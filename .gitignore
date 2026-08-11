@@ -1,0 +1,49 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Python
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+
+# Environment & secrets
+.env
+.env*
+
+# Models & audio artifacts (downloaded at setup time, never committed)
+*.litertlm
+*.tflite
+*.gguf
+*.bin
+*.onnx
+*.wav
+*.mp3
+*.ogg
+*.flac
+
+# Local runtime data (SQLite sessions, model caches)
+*.db
+*.sqlite
+*.sqlite3
+.gemma-translator/
+.litert-lm/
+.cache/
+
+# Logs
+*.log
+server.log
+
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# Coverage
+coverage/

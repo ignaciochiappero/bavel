@@ -1,0 +1,19 @@
+name: bavel
+
+services:
+  translator:
+    image: bavel
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: bavel
+    ports:
+      - "3000:3000"
+    volumes:
+      # Persists the LiteRT model (~2.4GB), HF cache and Moonshine models
+      # across container restarts — the ~5GB download happens only once.
+      - translator-data:/root
+    restart: unless-stopped
+
+volumes:
+  translator-data:
