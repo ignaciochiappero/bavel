@@ -129,16 +129,36 @@ Installs OS packages, sets up the environment, downloads the model, registers a 
 | Model re-downloads every rebuild | Volume `translator-data` was removed (don't use `down -v`) |
 | Hugging Face download is slow | Set a `HF_TOKEN` env var to lift anonymous rate limits |
 
+## Testing
+
+The suite covers the backend HTTP surface (with the ML models mocked — sessions, proxy security, static serving, STT/TTS/streaming handlers) and the frontend (audio helpers, API client, transcript panel).
+
+```bash
+# Backend (pytest) — runs inside the app container, no model needed
+test-backend.bat          # Windows
+docker run --rm -v "$PWD/backend:/app/backend" --entrypoint sh bavel \
+  -c "pip install -q pytest && cd /app && python -m pytest backend/tests"
+
+# Frontend (Vitest) — runs in a node container
+test-frontend.bat         # Windows
+docker run --rm -v "$PWD/frontend:/app" -w /app --entrypoint sh node:20-slim \
+  -c "npm ci --silent && npm test"
+```
+
+Run both before pushing changes.
+
 ## Project structure
 
 ```
 ├── backend/          # Python API server: Moonshine STT/TTS, sessions (SQLite), LLM proxy
-├── frontend/         # React (Vite) web UI
+│   └── tests/        # pytest suite (models mocked)
+├── frontend/         # React (Vite) web UI + Vitest suite
 ├── docker/           # Dockerfile + container entrypoint
 ├── deploy/           # systemd service template (Raspberry Pi)
 ├── stl/              # 3D-printable case files
 ├── docker-compose.yml   # One-command container setup (recommended)
 ├── run.bat              # Windows launcher (starts Docker Desktop if needed)
+├── test-backend.bat / test-frontend.bat   # Windows test runners
 ├── setup.sh / download_model.sh / start.sh   # native Linux/macOS flow
 └── deploy-pi.sh         # Raspberry Pi appliance bootstrap
 ```

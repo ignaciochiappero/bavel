@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "format": "oxfmt ."
+    "format": "oxfmt .",
+    "test": "vitest run"
   },
   "dependencies": {
     "@fontsource/roboto-mono": "^5.3.0",
@@ -15,10 +16,14 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@testing-library/dom": "^10.4.0",
+    "@testing-library/react": "^16.2.0",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
+    "jsdom": "^25.0.1",
     "oxfmt": "^0.58.0",
-    "vite": "^5.3.4"
+    "vite": "^5.3.4",
+    "vitest": "^2.1.9"
   }
 }

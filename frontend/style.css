@@ -494,87 +494,34 @@ body {
   gap: 4px;
 }
 
-/* Each row is a flex row that aligns the bubble */
-.chat-row {
-  display: flex;
-  flex: 0 0 auto;
-  min-height: 0;
+/* Plain-text bilingual document: the left column accumulates all spoken
+   text as one continuous paragraph, the right column the translations. */
+.doc-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
 }
 
-.chat-row-left {
-  justify-content: flex-start;
-  align-items: flex-start;
-}
-.chat-row-right {
-  justify-content: flex-end;
-  align-items: flex-end;
+.doc-column-target {
+  border-left: 1px solid var(--border-color);
+  padding-left: 16px;
 }
 
-/* Bubbles */
-.chat-bubble {
-  max-width: 82%;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  padding: 8px 12px;
-  background: var(--bg-black);
-  position: relative;
-}
-
-/* Left bubble: sharp bottom-left corner (tail) */
-.bubble-left {
-  border-bottom-left-radius: 1px;
-  box-shadow: -2px 2px 0 var(--red-muted);
-}
-
-/* Right bubble: sharp bottom-right corner (tail) */
-.bubble-right {
-  border-bottom-right-radius: 1px;
-  box-shadow: 2px 2px 0 var(--red-muted);
-  cursor: pointer;
-  transition:
-    background 0.15s,
-    color 0.15s,
-    border-color 0.15s;
-}
-
-.bubble-right:hover {
-  background: var(--red-muted);
-}
-
-.bubble-right:active {
-  background: var(--red-bright);
-}
-.bubble-right:active .bubble-text,
-.bubble-right:active .bubble-label {
-  color: var(--bg-black);
-}
-
-.bubble-label {
+.doc-label {
   font-size: 11px;
   font-weight: 700;
   color: var(--red-dim);
   letter-spacing: 0.08em;
   text-transform: uppercase;
+  margin-bottom: 4px;
 }
 
-.bubble-text {
+.doc-text {
   font-size: 16px;
-  line-height: 1.45;
+  line-height: 1.5;
   color: var(--red-bright);
   word-break: break-word;
   user-select: text;
-}
-
-.chat-meta {
-  visibility: hidden; /* duration/tokens are computed but hidden on the kiosk */
-  font-size: 9px;
-  color: var(--red-muted);
-  text-align: center;
-  padding-top: 2px;
-  min-height: 10px;
 }
 
 /* Collapsible Settings Fullscreen Overlay Form */
@@ -896,11 +843,6 @@ body {
 
 .voice-btn.muted {
   opacity: 0.45;
-}
-
-/* Full-width bubble for live transcription chunks */
-.bubble-transcription {
-  max-width: 100%;
 }
 
 /* Blinking caret on the in-progress live transcription bubble */

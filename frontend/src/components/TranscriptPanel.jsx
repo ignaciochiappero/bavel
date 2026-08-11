@@ -16,20 +16,9 @@
 
 import React, { useEffect, useRef } from "react"
 
-// Full conversation transcript: every utterance stays on screen as a
-// source/translation bubble pair, with save-to-session controls.
-function formatTime(ts) {
-  if (!ts) return ""
-  try {
-    return new Date(ts).toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-    })
-  } catch {
-    return ""
-  }
-}
-
+// Full conversation transcript: all spoken text accumulates as one
+// continuous paragraph per column (source | translation), with save-to-
+// session controls.
 export default function TranscriptPanel({
   conversation,
   saveState,
@@ -84,51 +73,46 @@ export default function TranscriptPanel({
             {placeholderText || "Select languages, push to talk"}
           </div>
         ) : (
-          conversation.map((m) =>
-            m.kind === "transcription" ? (
-              <div className="chat-message" key={m.key}>
-                <div className="chat-row chat-row-left">
-                  <div
-                    className={`chat-bubble bubble-left bubble-transcription ${
-                      m.live ? "bubble-live" : ""
-                    }`}
-                  >
-                    <div className="bubble-label">
-                      {m.sourceName}
-                      {m.ts ? ` · ${formatTime(m.ts)}` : ""}
-                    </div>
-                    <div className="bubble-text">
-                      {m.transcript || "escuchando…"}
-                      {m.live && <span className="live-caret" />}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="chat-message" key={m.key}>
-                <div className="chat-row chat-row-left">
-                  <div className="chat-bubble bubble-left">
-                    <div className="bubble-label">
-                      {m.sourceName}
-                      {m.ts ? ` · ${formatTime(m.ts)}` : ""}
-                    </div>
-                    <div className="bubble-text">{m.transcript || "—"}</div>
-                  </div>
-                </div>
-                <div className="chat-row chat-row-right">
-                  <div className="chat-bubble bubble-right">
-                    <div className="bubble-label">{m.targetName}</div>
-                    <div className="bubble-text">
-                      {m.translation === null
-                        ? "traduciendo…"
-                        : m.translation || "—"}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ),
-          )
+          <DocView conversation={conversation} />
         )}
+      </div>
+    </div>
+  )
+}
+
+// Bilingual continuous document: everything spoken flows as one paragraph
+// on the left column, every translation flows on the right column.
+function DocView({ conversation }) {
+  const translationEntries = conversation.filter((m) => m.kind === "translation")
+  const lastPair = translationEntries[translationEntries.length - 1]
+  const lastEntry = conversation[conversation.length - 1]
+  const isLive = Boolean(lastEntry && lastEntry.live)
+
+  const leftText = conversation
+    .map((m) => m.transcript)
+    .filter(Boolean)
+    .join(" ")
+  const rightText = translationEntries
+    .map((m) => m.translation)
+    .filter(Boolean)
+    .join(" ")
+
+  return (
+    <div className="doc-columns">
+      <div className="doc-column">
+        <div className="doc-label">
+          {lastEntry ? lastEntry.sourceName : "Transcripción"}
+        </div>
+        <div className="doc-text">
+          {leftText || "—"}
+          {isLive && <span className="live-caret" />}
+        </div>
+      </div>
+      <div className="doc-column doc-column-target">
+        <div className="doc-label">
+          {lastPair ? lastPair.targetName : "Traducción"}
+        </div>
+        <div className="doc-text">{rightText || "—"}</div>
       </div>
     </div>
   )

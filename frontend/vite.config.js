@@ -22,6 +22,9 @@ import react from "@vitejs/plugin-react"
 // the built frontend/dist itself, so this proxy is never involved.
 export default defineConfig({
   plugins: [react()],
+  test: {
+    environment: "jsdom",
+  },
   server: {
     host: "0.0.0.0",
     port: 5173,
