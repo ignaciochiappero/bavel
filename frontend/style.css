@@ -467,6 +467,11 @@ body {
   color: #00a650;
 }
 
+.header-btn.active {
+  background: var(--red-bright);
+  color: var(--bg-black);
+}
+
 .chat-panel {
   flex: 1 1 0;
   display: flex;

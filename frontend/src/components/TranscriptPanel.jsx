@@ -15,6 +15,7 @@
  */
 
 import React, { useEffect, useRef } from "react"
+import { computeDocView } from "../utils/docView"
 
 // Full conversation transcript: all spoken text accumulates as one
 // continuous paragraph per column (source | translation), with save-to-
@@ -22,10 +23,12 @@ import React, { useEffect, useRef } from "react"
 export default function TranscriptPanel({
   conversation,
   saveState,
+  floatOpen,
   onSave,
   onNewCall,
   onOpenHistory,
   onOpenSettings,
+  onToggleFloat,
   placeholderText,
 }) {
   const scrollRef = useRef(null)
@@ -41,6 +44,13 @@ export default function TranscriptPanel({
       <header className="app-title">
         <span className="app-title-name">BAVEL</span>
         <div className="header-actions">
+          <button
+            className={`header-btn ${floatOpen ? "active" : ""}`}
+            onClick={onToggleFloat}
+            title="Ventana flotante"
+          >
+            ⧉ Flotante
+          </button>
           <button className="header-btn" onClick={onOpenSettings} title="Configuración">
             ⚙️
           </button>
@@ -83,36 +93,20 @@ export default function TranscriptPanel({
 // Bilingual continuous document: everything spoken flows as one paragraph
 // on the left column, every translation flows on the right column.
 function DocView({ conversation }) {
-  const translationEntries = conversation.filter((m) => m.kind === "translation")
-  const lastPair = translationEntries[translationEntries.length - 1]
-  const lastEntry = conversation[conversation.length - 1]
-  const isLive = Boolean(lastEntry && lastEntry.live)
-
-  const leftText = conversation
-    .map((m) => m.transcript)
-    .filter(Boolean)
-    .join(" ")
-  const rightText = translationEntries
-    .map((m) => m.translation)
-    .filter(Boolean)
-    .join(" ")
+  const view = computeDocView(conversation)
 
   return (
     <div className="doc-columns">
       <div className="doc-column">
-        <div className="doc-label">
-          {lastEntry ? lastEntry.sourceName : "Transcripción"}
-        </div>
+        <div className="doc-label">{view.sourceLabel}</div>
         <div className="doc-text">
-          {leftText || "—"}
-          {isLive && <span className="live-caret" />}
+          {view.leftText || "—"}
+          {view.isLive && <span className="live-caret" />}
         </div>
       </div>
       <div className="doc-column doc-column-target">
-        <div className="doc-label">
-          {lastPair ? lastPair.targetName : "Traducción"}
-        </div>
-        <div className="doc-text">{rightText || "—"}</div>
+        <div className="doc-label">{view.targetLabel}</div>
+        <div className="doc-text">{view.rightText || "—"}</div>
       </div>
     </div>
   )

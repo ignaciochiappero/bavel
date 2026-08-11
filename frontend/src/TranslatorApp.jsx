@@ -20,6 +20,7 @@ import TranscriptPanel from "./components/TranscriptPanel"
 import Visualizer from "./components/Visualizer"
 import { useAudioRecorder } from "./hooks/useAudioRecorder"
 import { useTabAudioCapture } from "./hooks/useTabAudioCapture"
+import { openFloatingWindow } from "./utils/floatingWindow"
 import {
   transcribeAudio,
   translateText,
@@ -66,6 +67,7 @@ function TranslatorApp({ config, onOpenSettings }) {
   // re-subscribing the capture handler.
   const transcribeModeRef = useRef("translation")
   const voiceOnRef = useRef(config.enableTts)
+  const isTabCapturingRef = useRef(false)
   useEffect(() => {
     transcribeModeRef.current = transcribeMode
   }, [transcribeMode])
@@ -75,6 +77,17 @@ function TranslatorApp({ config, onOpenSettings }) {
 
   // Active Moonshine streaming session: { id, liveKey } or null.
   const sttStreamRef = useRef(null)
+
+  // Floating Picture-in-Picture window (translations over other tabs).
+  const [floatOpen, setFloatOpen] = useState(false)
+  const floatWindowRef = useRef(null)
+
+  // Push conversation snapshots to the floating window whenever they change.
+  useEffect(() => {
+    if (floatWindowRef.current) {
+      floatWindowRef.current.post(conversation)
+    }
+  }, [conversation])
 
   // Translation State
   const [transcriptionData, setTranscriptionData] = useState({
@@ -115,6 +128,12 @@ function TranslatorApp({ config, onOpenSettings }) {
     stopCapture: stopTabCapture,
     analyser: tabAnalyser,
   } = useTabAudioCapture()
+
+  // Synced AFTER the hook: reading isTabCapturing in a deps array before its
+  // declaration would throw a temporal-dead-zone error at render.
+  useEffect(() => {
+    isTabCapturingRef.current = isTabCapturing
+  }, [isTabCapturing])
 
   // Live ref to the active lane so the tab-listening loop always uses the
   // latest selection without re-subscribing the chunk handler.
@@ -186,6 +205,9 @@ function TranslatorApp({ config, onOpenSettings }) {
           alert("TTS playback failed. Backend server may be offline.")
         }
         player.play().catch((e) => {
+          // AbortError = playback was intentionally interrupted by a newer
+          // chunk or stopSpeaking() — expected, not a real failure.
+          if (e && e.name === "AbortError") return
           console.error("Audio play error:", e)
           stopSpeaking()
         })
@@ -301,7 +323,7 @@ function TranslatorApp({ config, onOpenSettings }) {
         ])
         setSaveState((s) => (s === "saved" ? "dirty" : s))
 
-        if (config.enableTts && voiceOnRef.current && !isTabCapturing) {
+        if (config.enableTts && voiceOnRef.current && !isTabCapturingRef.current) {
           playTTS(result.translation, dst.ttsLang)
         }
       } catch (err) {
@@ -517,6 +539,30 @@ function TranslatorApp({ config, onOpenSettings }) {
     [isRecording, lang1Index, lang2Index],
   )
 
+  // Open/close the floating translations window (Document PiP).
+  const handleToggleFloat = useCallback(async () => {
+    if (floatWindowRef.current) {
+      floatWindowRef.current.close()
+      floatWindowRef.current = null
+      setFloatOpen(false)
+      return
+    }
+    try {
+      const { close, post } = await openFloatingWindow({
+        conversation,
+        onClose: () => {
+          floatWindowRef.current = null
+          setFloatOpen(false)
+        },
+      })
+      floatWindowRef.current = { close, post }
+      setFloatOpen(true)
+    } catch (err) {
+      console.error("Floating window failed:", err)
+      alert(err.message)
+    }
+  }, [conversation])
+
   // Recording triggers
   const handleRecordStart = useCallback(
     async (lane) => {
@@ -682,10 +728,12 @@ function TranslatorApp({ config, onOpenSettings }) {
       <TranscriptPanel
         conversation={conversation}
         saveState={saveState}
+        floatOpen={floatOpen}
         onSave={handleSave}
         onNewCall={handleNewCall}
         onOpenHistory={handleOpenHistory}
         onOpenSettings={onOpenSettings}
+        onToggleFloat={handleToggleFloat}
         placeholderText="Select languages, push to talk"
       />
 
