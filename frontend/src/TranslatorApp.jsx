@@ -90,9 +90,9 @@ function TranslatorApp({ config, onOpenSettings }) {
   // Currently-playing TTS audio element (chunked playback chain)
   const onlineAudioPlayerRef = useRef(null)
 
-  // Language Lanes State
-  const [lang1Index, setLang1Index] = useState(0)
-  const [lang2Index, setLang2Index] = useState(1)
+  // Language Lanes State — default: English (lane 1) → Spanish (lane 2)
+  const [lang1Index, setLang1Index] = useState(1)
+  const [lang2Index, setLang2Index] = useState(2)
   const [activeLaneRecording, setActiveLaneRecording] = useState(null)
 
   // Live-refs for lane languages (streaming closure needs them).
