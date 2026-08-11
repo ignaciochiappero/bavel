@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { computeDocView } from "./docView"
+import { computeDocView, computeFloatView } from "./docView"
 
 describe("computeDocView", () => {
   it("joins all transcripts into one continuous left paragraph", () => {
@@ -56,5 +56,26 @@ describe("computeDocView", () => {
     ])
     expect(view.leftText).toBe("Hi")
     expect(view.rightText).toBe("Hola")
+  })
+})
+
+describe("computeFloatView", () => {
+  const conversation = [
+    { kind: "translation", sourceName: "English", targetName: "Spanish", transcript: "Hello", translation: "Hola" },
+    { kind: "transcription", sourceName: "English", transcript: "Live", live: true },
+  ]
+
+  it("shows only the translation in translation mode", () => {
+    const view = computeFloatView(conversation, "translation")
+    expect(view.label).toBe("Spanish")
+    expect(view.text).toBe("Hola")
+    expect(view.isLive).toBe(false)
+  })
+
+  it("shows only the source text in transcription mode", () => {
+    const view = computeFloatView(conversation, "transcription")
+    expect(view.label).toBe("English")
+    expect(view.text).toBe("Hello Live")
+    expect(view.isLive).toBe(true)
   })
 })

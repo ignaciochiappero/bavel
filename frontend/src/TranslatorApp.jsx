@@ -82,12 +82,13 @@ function TranslatorApp({ config, onOpenSettings }) {
   const [floatOpen, setFloatOpen] = useState(false)
   const floatWindowRef = useRef(null)
 
-  // Push conversation snapshots to the floating window whenever they change.
+  // Push conversation snapshots to the floating window whenever they change
+  // (the window's content depends on the active mode too).
   useEffect(() => {
     if (floatWindowRef.current) {
-      floatWindowRef.current.post(conversation)
+      floatWindowRef.current.post({ conversation, transcribeMode })
     }
-  }, [conversation])
+  }, [conversation, transcribeMode])
 
   // Translation State
   const [transcriptionData, setTranscriptionData] = useState({
@@ -549,7 +550,7 @@ function TranslatorApp({ config, onOpenSettings }) {
     }
     try {
       const { close, post } = await openFloatingWindow({
-        conversation,
+        payload: { conversation, transcribeMode },
         onClose: () => {
           floatWindowRef.current = null
           setFloatOpen(false)
@@ -561,7 +562,7 @@ function TranslatorApp({ config, onOpenSettings }) {
       console.error("Floating window failed:", err)
       alert(err.message)
     }
-  }, [conversation])
+  }, [conversation, transcribeMode])
 
   // Recording triggers
   const handleRecordStart = useCallback(

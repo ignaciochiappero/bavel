@@ -20,3 +20,14 @@ export function computeDocView(conversation) {
     isLive: Boolean(lastEntry && lastEntry.live),
   }
 }
+
+// Projection for the floating window, which is mode-aware:
+// - translation mode: only the resulting translation
+// - transcription mode: only the source text (with live caret)
+export function computeFloatView(conversation, transcribeMode) {
+  const view = computeDocView(conversation)
+  if (transcribeMode === "transcription") {
+    return { label: view.sourceLabel, text: view.leftText, isLive: view.isLive }
+  }
+  return { label: view.targetLabel, text: view.rightText, isLive: false }
+}
