@@ -45,15 +45,10 @@ body {
   color: var(--red-bright);
   overflow: hidden;
   overflow-x: hidden;
-  cursor: none;
+  cursor: auto;
 }
 
 @media (min-width: 1001px) {
-  html,
-  body {
-    cursor: auto;
-  }
-
   #root {
     border: 1px solid var(--border-color);
   }
@@ -249,12 +244,33 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 6px;
+  right: 10px;
 }
 
 .lane-label {
   font-size: 12px;
   font-weight: 700;
   color: var(--red-bright);
+}
+
+/* Mouse-driven language dropdown in each lane */
+.lane-select {
+  background: var(--bg-black);
+  color: var(--red-bright);
+  border: 1px solid var(--border-color);
+  border-radius: 2px;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 1px 4px;
+  max-width: 60%;
+  cursor: pointer;
+  user-select: text;
+}
+
+.lane-select:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .key-hint {
@@ -522,6 +538,7 @@ body {
   color: var(--red-bright);
   word-break: break-word;
   user-select: text;
+  cursor: text;
 }
 
 /* Collapsible Settings Fullscreen Overlay Form */

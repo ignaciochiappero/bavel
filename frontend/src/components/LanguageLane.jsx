@@ -16,17 +16,19 @@
 
 import React, { useEffect, useRef } from "react"
 
-// One person's lane: the vertical "revolver" language selector plus the
-// recording highlight state. The kiosk is keyboard-first — the ◀▶ arrows stay
+// One person's lane: the vertical "revolver" language selector plus a
+// mouse-driven dropdown. The kiosk is keyboard-first — the ◀▶ arrows stay
 // in the DOM for layout but are hidden via CSS (.rotator-arrow).
 export default function LanguageLane({
   laneId,
   laneLabel,
   languages,
   currentIndex,
+  otherLaneCode,
   isRecording,
   isActivePerson,
   onRotate,
+  onSelect,
 }) {
   const drumRef = useRef(null)
 
@@ -48,6 +50,11 @@ export default function LanguageLane({
     if (!isRecording) onRotate(1)
   }
 
+  const handleSelect = (e) => {
+    const index = languages.findIndex((l) => l.code === e.target.value)
+    if (index !== -1 && !isRecording) onSelect(index)
+  }
+
   return (
     <section
       className={`language-lane lane-${laneId === 1 ? "one" : "two"} ${isRecording ? "recording" : ""} ${isActivePerson ? "selected" : ""}`}
@@ -55,6 +62,23 @@ export default function LanguageLane({
     >
       <div className="lane-header">
         <span className="lane-label">{laneLabel}</span>
+        <select
+          className="lane-select"
+          value={languages[currentIndex].code}
+          onChange={handleSelect}
+          disabled={isRecording}
+          title="Select language"
+        >
+          {languages.map((l) => (
+            <option
+              key={l.code}
+              value={l.code}
+              disabled={l.code === otherLaneCode}
+            >
+              {l.name}
+            </option>
+          ))}
+        </select>
       </div>
       <div className="revolver-stage">
         <button

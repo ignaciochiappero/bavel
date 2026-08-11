@@ -476,13 +476,18 @@ function TranslatorApp({ config, onOpenSettings }) {
         }
       }
 
+      const stream = sttStreamRef.current
+      if (!stream) return
+
       try {
-        const res = await sttStreamAppend(sttStreamRef.current.id, base64Data)
+        const res = await sttStreamAppend(stream.id, base64Data)
+        // Capture the live key BEFORE the updater runs: React defers state
+        // updaters to the next render, and finalizeLiveStream may have
+        // nulled sttStreamRef by then (reading it here would crash).
+        const liveKey = stream.liveKey
         setConversation((prev) =>
           prev.map((m) =>
-            m.key === sttStreamRef.current.liveKey
-              ? { ...m, transcript: res.text }
-              : m,
+            m.key === liveKey ? { ...m, transcript: res.text } : m,
           ),
         )
       } catch (err) {
@@ -497,6 +502,19 @@ function TranslatorApp({ config, onOpenSettings }) {
       }
     },
     [finalizeLiveStream, processTranslation],
+  )
+
+  // Mouse-driven language pick: the two lanes may never share a language.
+  const handleSelectLanguage = useCallback(
+    (lane, index) => {
+      if (isRecording) return
+      const otherIndex = lane === 1 ? lang2Index : lang1Index
+      if (index === otherIndex) return
+      playBlip("language")
+      if (lane === 1) setLang1Index(index)
+      else setLang2Index(index)
+    },
+    [isRecording, lang1Index, lang2Index],
   )
 
   // Recording triggers
@@ -750,22 +768,26 @@ function TranslatorApp({ config, onOpenSettings }) {
             laneLabel="1"
             languages={AVAILABLE_LANGUAGES}
             currentIndex={lang1Index}
+            otherLaneCode={AVAILABLE_LANGUAGES[lang2Index].code}
             isRecording={activeLaneRecording === 1}
             isActivePerson={
               config.keyboardMode === "landscape" && activePerson === 1
             }
             onRotate={(dir) => handleRotateLanguage(1, dir)}
+            onSelect={(index) => handleSelectLanguage(1, index)}
           />
           <LanguageLane
             laneId={2}
             laneLabel="2"
             languages={AVAILABLE_LANGUAGES}
             currentIndex={lang2Index}
+            otherLaneCode={AVAILABLE_LANGUAGES[lang1Index].code}
             isRecording={activeLaneRecording === 2}
             isActivePerson={
               config.keyboardMode === "landscape" && activePerson === 2
             }
             onRotate={(dir) => handleRotateLanguage(2, dir)}
+            onSelect={(index) => handleSelectLanguage(2, index)}
           />
         </div>
 
