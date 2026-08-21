@@ -27,6 +27,8 @@ import {
 } from "lucide-react"
 import { computeDocView } from "../utils/docView"
 import StreamingText from "./StreamingText"
+import LiquidMenu from "./LiquidMenu"
+import Tooltip, { useTooltipTilt } from "./Tooltip"
 
 // Full conversation transcript: all spoken text accumulates as one
 // continuous paragraph per column (source | translation), with save-to-
@@ -43,6 +45,7 @@ export default function TranscriptPanel({
   placeholderText,
 }) {
   const scrollRef = useRef(null)
+  const { tilt: floatTilt, tiltHandlers: floatTiltHandlers } = useTooltipTilt()
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -56,58 +59,65 @@ export default function TranscriptPanel({
         <span className="app-title-name">BAVEL</span>
         <div className="header-actions">
           <button
-            className={`header-btn ${floatOpen ? "active" : ""}`}
+            className={`header-icon-btn ${floatOpen ? "active" : ""}`}
             onClick={onToggleFloat}
-            title="Ventana flotante"
+            aria-label="Ventana flotante"
+            aria-pressed={floatOpen}
+            {...floatTiltHandlers}
           >
-            <PictureInPicture2 size={14} strokeWidth={1.75} />
-            <span>Flotante</span>
+            <PictureInPicture2 size={17} strokeWidth={1.75} />
+            <Tooltip
+              label="Ventana flotante"
+              tilt={floatTilt}
+              placement="bottom"
+            />
           </button>
-          <button
-            className="header-btn header-btn-icon"
-            onClick={onOpenSettings}
-            title="Configuración"
-            aria-label="Configuración"
-          >
-            <Settings size={15} strokeWidth={1.75} />
-          </button>
-          <button className="header-btn" onClick={onOpenHistory}>
-            <History size={14} strokeWidth={1.75} />
-            <span>Historial</span>
-          </button>
-          <button className="header-btn" onClick={onNewCall}>
-            <MessageSquarePlus size={14} strokeWidth={1.75} />
-            <span>Nueva charla</span>
-          </button>
-          <button
-            className={`header-btn header-btn-save ${
-              saveState === "saved" ? "saved" : ""
-            }`}
-            onClick={onSave}
-            disabled={conversation.length === 0 || saveState === "saving"}
-          >
-            {saveState === "saving" ? (
-              <>
-                <Loader2 size={14} strokeWidth={1.75} className="spin" />
-                <span>Guardando…</span>
-              </>
-            ) : saveState === "saved" ? (
-              <>
-                <Check size={14} strokeWidth={2} />
-                <span>Guardado</span>
-              </>
-            ) : saveState === "error" ? (
-              <>
-                <RotateCcw size={14} strokeWidth={1.75} />
-                <span>Reintentar</span>
-              </>
-            ) : (
-              <>
-                <Save size={14} strokeWidth={1.75} />
-                <span>Guardar</span>
-              </>
-            )}
-          </button>
+          <LiquidMenu
+            items={[
+              {
+                key: "settings",
+                label: "Configuración",
+                icon: <Settings size={16} strokeWidth={1.75} />,
+                onClick: onOpenSettings,
+              },
+              {
+                key: "history",
+                label: "Historial",
+                icon: <History size={16} strokeWidth={1.75} />,
+                onClick: onOpenHistory,
+              },
+              {
+                key: "new",
+                label: "Nueva charla",
+                icon: <MessageSquarePlus size={16} strokeWidth={1.75} />,
+                onClick: onNewCall,
+              },
+              {
+                key: "save",
+                label:
+                  saveState === "saving"
+                    ? "Guardando…"
+                    : saveState === "saved"
+                      ? "Guardado"
+                      : saveState === "error"
+                        ? "Reintentar guardado"
+                        : "Guardar",
+                icon:
+                  saveState === "saving" ? (
+                    <Loader2 size={16} strokeWidth={1.75} className="spin" />
+                  ) : saveState === "saved" ? (
+                    <Check size={16} strokeWidth={2} />
+                  ) : saveState === "error" ? (
+                    <RotateCcw size={16} strokeWidth={1.75} />
+                  ) : (
+                    <Save size={16} strokeWidth={1.75} />
+                  ),
+                onClick: onSave,
+                disabled: conversation.length === 0 || saveState === "saving",
+                active: saveState === "saved",
+              },
+            ]}
+          />
         </div>
       </header>
       <div className="chat-panel" ref={scrollRef}>

@@ -118,9 +118,20 @@ describe("TranscriptPanel", () => {
     expect(col.querySelector(".live-caret")).toBeTruthy()
   })
 
+  const openMenu = () =>
+    fireEvent.click(screen.getByRole("button", { name: "Acciones" }))
+
   it("disables the save button with no messages", () => {
     render(<TranscriptPanel {...baseProps} />)
+    openMenu()
     expect(screen.getByRole("button", { name: "Guardar" }).disabled).toBe(true)
+  })
+
+  it("keeps the actions unreachable while the menu is collapsed", () => {
+    render(<TranscriptPanel {...baseProps} />)
+    // Only the trigger is exposed; the rest are hidden behind it.
+    expect(screen.queryByRole("button", { name: "Historial" })).toBeNull()
+    expect(screen.getByRole("button", { name: "Acciones" })).toBeTruthy()
   })
 
   it("shows the saving state", () => {
@@ -131,6 +142,7 @@ describe("TranscriptPanel", () => {
         conversation={[{ key: 1, kind: "transcription", transcript: "x" }]}
       />,
     )
+    openMenu()
     expect(screen.getByRole("button", { name: /Guardando/ }).disabled).toBe(true)
   })
 
@@ -142,6 +154,7 @@ describe("TranscriptPanel", () => {
         conversation={[{ key: 1, kind: "transcription", transcript: "x" }]}
       />,
     )
+    openMenu()
     expect(screen.getByRole("button", { name: /Guardado/ })).toBeTruthy()
   })
 
@@ -152,10 +165,14 @@ describe("TranscriptPanel", () => {
         conversation={[{ key: 1, kind: "transcription", transcript: "x" }]}
       />,
     )
+    // The menu closes after each pick, so it is reopened between actions.
+    openMenu()
     fireEvent.click(screen.getByRole("button", { name: "Historial" }))
     expect(baseProps.onOpenHistory).toHaveBeenCalled()
+    openMenu()
     fireEvent.click(screen.getByRole("button", { name: "Nueva charla" }))
     expect(baseProps.onNewCall).toHaveBeenCalled()
+    openMenu()
     fireEvent.click(screen.getByRole("button", { name: "Guardar" }))
     expect(baseProps.onSave).toHaveBeenCalled()
   })
@@ -211,5 +228,42 @@ describe("TranscriptPanel — LocalAgreement pending tail", () => {
       />,
     )
     expect(container.querySelector(".doc-text").textContent.trim()).toBe("hola")
+  })
+})
+
+describe("TranscriptPanel — floating window toggle", () => {
+  it("lives outside the menu, reachable without opening it", () => {
+    render(<TranscriptPanel {...baseProps} />)
+    // No click on the trigger first: it must be there straight away.
+    expect(screen.getByRole("button", { name: "Ventana flotante" })).toBeTruthy()
+  })
+
+  it("fires its handler", () => {
+    const onToggleFloat = vi.fn()
+    render(<TranscriptPanel {...baseProps} onToggleFloat={onToggleFloat} />)
+    fireEvent.click(screen.getByRole("button", { name: "Ventana flotante" }))
+    expect(onToggleFloat).toHaveBeenCalled()
+  })
+
+  it("reports its on/off state, which is why it is not buried in the menu", () => {
+    const { rerender } = render(<TranscriptPanel {...baseProps} floatOpen={false} />)
+    const btn = () => screen.getByRole("button", { name: "Ventana flotante" })
+    expect(btn().getAttribute("aria-pressed")).toBe("false")
+    expect(btn().className).not.toContain("active")
+
+    rerender(<TranscriptPanel {...baseProps} floatOpen={true} />)
+    expect(btn().getAttribute("aria-pressed")).toBe("true")
+    expect(btn().className).toContain("active")
+  })
+
+  it("is no longer among the menu actions", () => {
+    render(<TranscriptPanel {...baseProps} />)
+    fireEvent.click(screen.getByRole("button", { name: "Acciones" }))
+    const menuLabels = ["Configuración", "Historial", "Nueva charla", "Guardar"]
+    menuLabels.forEach((l) =>
+      expect(screen.getByRole("button", { name: l })).toBeTruthy(),
+    )
+    // Exactly one control carries this label — the standalone one.
+    expect(screen.getAllByRole("button", { name: "Ventana flotante" })).toHaveLength(1)
   })
 })

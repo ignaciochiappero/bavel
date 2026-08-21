@@ -69,8 +69,9 @@
 
 :root {
   /* Accent. App.jsx writes the theme picker's colour into --bg-black; the name
-     is kept for compatibility and reinterpreted here as the accent hue. */
-  --bg-black: #6c8cff;
+     is kept for compatibility and reinterpreted here as the accent hue.
+     Neutral grey is the default. */
+  --bg-black: #a3a3a3;
   --accent: var(--bg-black);
 
   /* Ink */
@@ -171,6 +172,43 @@ body::after {
   animation: drift-b 41s var(--ease) infinite alternate;
 }
 
+/* Neutral is the DEFAULT theme, so these rules apply unless a colour accent is
+   explicitly selected. The selector is inverted for that reason: keying off
+   [data-neutral="true"] would flash a coloured aurora on every page load,
+   before React mounts and writes the attribute.
+
+   The accent alone is not enough, because the aurora carries a fixed pink orb
+   that would keep tinting a supposedly colourless interface. Here both orbs
+   drop to white, so the surface reads in greys. */
+:root:not([data-neutral="false"]) body::before {
+  background: radial-gradient(
+    circle at 30% 30%,
+    rgba(255, 255, 255, 0.16),
+    transparent 68%
+  );
+}
+
+:root:not([data-neutral="false"]) body::after {
+  background: radial-gradient(
+    circle at 60% 40%,
+    rgba(255, 255, 255, 0.1),
+    transparent 66%
+  );
+}
+
+/* Glass picks up a touch of saturation from whatever is behind it; with no
+   colour there, the boost only makes noise. */
+:root:not([data-neutral="false"]) .response-drawer,
+:root:not([data-neutral="false"]) .capture-mode-bar,
+:root:not([data-neutral="false"]) .language-lane,
+:root:not([data-neutral="false"]) .settings-overlay,
+:root:not([data-neutral="false"]) .history-overlay,
+:root:not([data-neutral="false"]) .liquid-item,
+:root:not([data-neutral="false"]) .header-icon-btn {
+  backdrop-filter: blur(var(--blur)) saturate(100%);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(100%);
+}
+
 @keyframes drift-a {
   to {
     transform: translate3d(9vw, 7vh, 0) scale(1.16);
@@ -230,6 +268,9 @@ body::after {
   justify-content: space-between;
   gap: 14px;
   position: relative;
+  /* Above the transcript, so the action menu's tooltips are not painted
+     behind the text below the header. */
+  z-index: 20;
   padding: 13px 18px;
   background: linear-gradient(
     to bottom,
@@ -270,7 +311,7 @@ body::after {
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 9px;
 }
 
 /* --- Buttons --------------------------------------------------------------- */
@@ -626,6 +667,8 @@ body::after {
 
 .language-lane {
   position: relative;
+  /* Driven per frame by useAudioGlow; 0 when this lane is silent. */
+  --audio-level: 0;
   flex: 1;
   min-width: 0;
   padding: 13px 16px;
@@ -641,32 +684,64 @@ body::after {
 /* Active speaker: a rim of accent light, replacing the old corner brackets. */
 .language-lane.selected {
   border-color: color-mix(in oklab, var(--accent) 45%, transparent);
-  box-shadow: 0 0 34px -10px var(--accent);
 }
 
-.language-lane.recording {
-  border-color: color-mix(in oklab, var(--accent) 65%, transparent);
-  background: color-mix(in oklab, var(--accent) 12%, transparent);
-  box-shadow: 0 0 44px -8px var(--accent);
-}
-
+/* The panel itself is the level meter, and the light inside it is irregular
+   rather than an even halo: three offset blobs, each drifting on its own
+   period, so the glow breathes unevenly the way an aurora does.
+   --------------------------------------------------------------------------- */
+.language-lane.selected::after,
 .language-lane.recording::after {
   content: "";
   position: absolute;
   inset: 0;
+  border-radius: inherit;
   pointer-events: none;
-  background: radial-gradient(
-    120% 90% at 50% 120%,
-    color-mix(in oklab, var(--accent) 34%, transparent),
-    transparent 70%
-  );
-  animation: lane-breathe 1.6s var(--ease) infinite alternate;
+  background:
+    radial-gradient(42% 58% at 18% 30%, var(--accent), transparent 62%),
+    radial-gradient(52% 44% at 74% 62%, var(--accent), transparent 60%),
+    radial-gradient(34% 56% at 48% 88%, var(--accent), transparent 64%);
+  filter: blur(16px);
+  /* Reactivity rides OPACITY, deliberately. An earlier version drove
+     color-mix() with a calc()'d percentage and the whole declaration was
+     dropped: measured on the live panel, blur and alpha stayed frozen at
+     their level-0 values whatever the audio did. A plain numeric calc on
+     opacity is resolved reliably. */
+  opacity: calc(var(--audio-level) * 0.5);
+  animation: aurora-drift 11s ease-in-out infinite alternate;
 }
 
-@keyframes lane-breathe {
-  to {
-    opacity: 0.45;
+/* Each blob travels a different distance and direction, so they never line
+   up into a single pulsing shape. */
+@keyframes aurora-drift {
+  0% {
+    background-position:
+      0% 0%,
+      0% 0%,
+      0% 0%;
+    transform: scale(1);
   }
+  50% {
+    background-position:
+      12% -8%,
+      -10% 6%,
+      6% 10%;
+    transform: scale(1.06);
+  }
+  100% {
+    background-position:
+      -8% 7%,
+      9% -6%,
+      -6% -9%;
+    transform: scale(1.02);
+  }
+}
+
+/* The outer halo keeps fixed values: it frames the panel, while the aurora
+   above carries the level. */
+.language-lane.selected,
+.language-lane.recording {
+  box-shadow: 0 0 34px -12px var(--accent);
 }
 
 /* Kiosk decoration from the old theme: still in the DOM, no longer drawn. */
@@ -766,30 +841,6 @@ body::after {
 .rotator-arrow,
 .language-name {
   display: none;
-}
-
-/* --- Visualizer ------------------------------------------------------------ */
-.canvas-wrap {
-  position: relative;
-  height: 46px;
-  border: 1px solid var(--stroke);
-  border-radius: var(--radius);
-  overflow: hidden;
-  background: rgba(0, 0, 0, 0.22);
-}
-
-/* #liquid is defined in index.html. Applied to the canvas rather than the
-   wrapper, otherwise it would melt the panel's own border and corners too. */
-.canvas-wrap canvas {
-  display: block;
-  width: 100%;
-  height: 100%;
-  filter: url(#liquid);
-}
-
-.visualizer-divider {
-  display: flex;
-  gap: 12px;
 }
 
 /* --- Overlays -------------------------------------------------------------- */
@@ -1005,15 +1056,235 @@ input[type="range"]::-webkit-slider-thumb {
 
 /* Users who ask for less motion get a still interface. */
 @media (prefers-reduced-motion: reduce) {
+  .language-lane.selected::after,
+  .language-lane.recording::after,
   body::before,
   body::after,
   .warmup-dot,
   .live-caret,
-  .language-lane.recording::after {
-    animation: none;
-  }
+
 
   * {
     transition-duration: 0.01ms !important;
+  }
+}
+
+/* --- Radial action menu ----------------------------------------------------
+   Actions fan out from one trigger. Each is a glass surface like every other
+   control on the panel — the gooey blob layer was dropped because merging
+   shapes need to be opaque, and a translucent version of it reads as a smear
+   of light around each icon rather than as liquid.
+
+   The liquid quality lives in the MOTION instead: an overshoot curve and a
+   staggered release, so the group unpeels with weight.
+   --------------------------------------------------------------------------- */
+.liquid-menu {
+  position: relative;
+  width: var(--blob);
+  height: var(--blob);
+  flex-shrink: 0;
+  z-index: 60;
+}
+
+.liquid-items {
+  position: absolute;
+  inset: 0;
+}
+
+.liquid-item {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--stroke);
+  border-radius: 50%;
+  background: var(--glass);
+  backdrop-filter: blur(var(--blur)) saturate(150%);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(150%);
+  color: var(--ink-80);
+  cursor: pointer;
+  transition:
+    transform 0.5s cubic-bezier(0.34, 1.46, 0.64, 1),
+    background 0.3s var(--ease),
+    border-color 0.3s var(--ease),
+    color 0.3s var(--ease),
+    opacity 0.28s var(--ease);
+}
+
+.liquid-item:hover:not(:disabled),
+.liquid-item:focus-visible {
+  background: var(--glass-strong);
+  border-color: var(--ink-20);
+  color: var(--ink-100);
+  /* Above its siblings, so its tooltip is not covered by a later button. */
+  z-index: 20;
+}
+
+.liquid-item:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.liquid-item.active {
+  color: var(--accent);
+  border-color: color-mix(in oklab, var(--accent) 40%, transparent);
+}
+
+.liquid-trigger {
+  color: var(--ink-100);
+}
+
+/* Standalone round header control, matching the menu's buttons so the two
+   read as one family. Used by the floating-window toggle, which stays out of
+   the menu because its on/off state has to be visible at a glance. */
+.header-icon-btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border: 1px solid var(--stroke);
+  border-radius: 50%;
+  background: var(--glass);
+  backdrop-filter: blur(var(--blur)) saturate(150%);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(150%);
+  color: var(--ink-80);
+  cursor: pointer;
+  z-index: 40;
+  transition:
+    background 0.3s var(--ease),
+    border-color 0.3s var(--ease),
+    color 0.3s var(--ease);
+}
+
+.header-icon-btn:hover,
+.header-icon-btn:focus-visible {
+  background: var(--glass-strong);
+  border-color: var(--ink-20);
+  color: var(--ink-100);
+  z-index: 50;
+}
+
+.header-icon-btn.active {
+  color: var(--accent);
+  border-color: color-mix(in oklab, var(--accent) 45%, transparent);
+  box-shadow: 0 0 22px -8px var(--accent);
+}
+
+
+
+/* Collapsed: the actions hide behind the trigger. */
+.liquid-menu[data-open="false"] .liquid-item:not(.liquid-trigger) {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* --- Tooltip ---------------------------------------------------------------
+   Reveal and tilt are separate elements on purpose: the reveal plays once
+   with an overshoot, while the tilt is retargeted on every mouse move and
+   needs a short curve. On one element each move would restart the bounce.
+   --------------------------------------------------------------------------- */
+.tip {
+  position: absolute;
+  z-index: 60;
+  pointer-events: none;
+  opacity: 0;
+  transition:
+    opacity 0.18s var(--ease),
+    transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.tip-inner {
+  display: block;
+  position: relative;
+  padding: 6px 12px 7px;
+  border-radius: var(--radius-pill);
+  background: rgba(10, 12, 20, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  color: var(--ink-100);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.9);
+  /* Follows the pointer — short and soft, since it restarts constantly. */
+  transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Hairlines that fade out from the middle. */
+.tip-rule {
+  position: absolute;
+  bottom: 0;
+  height: 1px;
+  pointer-events: none;
+}
+
+.tip-rule-a {
+  left: 18%;
+  right: 18%;
+  background: linear-gradient(
+    to right,
+    transparent,
+    color-mix(in oklab, var(--accent) 80%, white),
+    transparent
+  );
+}
+
+.tip-rule-b {
+  left: 32%;
+  right: 32%;
+  background: linear-gradient(
+    to right,
+    transparent,
+    rgba(255, 255, 255, 0.55),
+    transparent
+  );
+}
+
+/* Placements: the reveal springs in FROM the anchor's side. */
+.tip-left {
+  right: calc(100% + 10px);
+  top: 50%;
+  transform: translate(10px, -50%) scale(0.72);
+}
+
+.tip-bottom {
+  left: 50%;
+  top: calc(100% + 10px);
+  transform: translate(-50%, -10px) scale(0.72);
+}
+
+.liquid-item:hover .tip-left,
+.liquid-item:focus-visible .tip-left,
+.header-icon-btn:hover .tip-left,
+.header-icon-btn:focus-visible .tip-left {
+  opacity: 1;
+  transform: translate(0, -50%) scale(1);
+}
+
+.liquid-item:hover .tip-bottom,
+.liquid-item:focus-visible .tip-bottom,
+.header-icon-btn:hover .tip-bottom,
+.header-icon-btn:focus-visible .tip-bottom {
+  opacity: 1;
+  transform: translate(-50%, 0) scale(1);
+}
+
+/* Collapsed menu items must never show a tooltip. */
+.liquid-menu[data-open="false"] .liquid-item:not(.liquid-trigger) .tip {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .liquid-item,
+  .tip,
+  .tip-inner {
+    transition-duration: 0.01ms;
   }
 }

@@ -16,6 +16,7 @@
 
 import React from "react"
 import { X, Minus, Plus } from "lucide-react"
+import { NEUTRAL_ACCENT } from "../theme"
 
 // Fullscreen developer settings: theme color, LLM endpoint/model/key,
 // keyboard mode, TTS toggle, visualizer density, and system volume
@@ -37,6 +38,9 @@ export default function SettingsOverlay({
     { name: "VIOLET", value: "#a78bfa" },
     { name: "AMBER", value: "#ffb454" },
     { name: "ICE", value: "#7dd3fc" },
+    // Neutral is more than a grey accent: it also drains the colour from the
+    // aurora behind the panels, which no other swatch does. See App.jsx.
+    { name: "NEUTRAL", value: NEUTRAL_ACCENT },
   ];
 
   const [systemVolume, setSystemVolume] = React.useState(null);
@@ -207,24 +211,6 @@ export default function SettingsOverlay({
           </label>
         </div>
 
-        <div className="form-group">
-          <label>Visualizer</label>
-          <div className="slider-row">
-            <div className="slider-group">
-              <label>
-                Bars: <span>{config.visualizerBars}</span>
-              </label>
-              <input
-                type="range"
-                min="8"
-                max="128"
-                step="8"
-                value={config.visualizerBars}
-                onChange={(e) => handleChange("visualizerBars", e.target.value)}
-              />
-            </div>
-          </div>
-        </div>
       </div>
     </div>
   )

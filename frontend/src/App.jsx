@@ -18,26 +18,14 @@ import React, { useState, useEffect } from "react"
 import TranslatorApp from "./TranslatorApp"
 import SettingsOverlay from "./components/SettingsOverlay"
 import { testConnectionAPI } from "./utils/api"
+import { NEUTRAL_ACCENT, DEFAULT_ACCENT, isLegacyAccent } from "./theme"
 
 // App shell: owns the global config (keyboardMode and themeColor persist in
 // localStorage), the settings overlay, and applies the theme by overriding
 // the --bg-black CSS variable.
-// Accents from the old high-contrast kiosk theme. They were picked for a
-// light orange ground and clash with the dark glass one, so a stored value
-// from that era is migrated to the current default instead of being honoured.
-const LEGACY_ACCENTS = new Set([
-  "#ffa500",
-  "#ff4444",
-  "#ffffff",
-  "#ffeb3b",
-  "#2196f3",
-  "#4caf50",
-])
-const DEFAULT_ACCENT = "#6c8cff"
-
 function resolveThemeColor() {
   const stored = localStorage.getItem("themeColor")
-  if (!stored || LEGACY_ACCENTS.has(stored.toLowerCase())) return DEFAULT_ACCENT
+  if (!stored || isLegacyAccent(stored)) return DEFAULT_ACCENT
   return stored
 }
 
@@ -50,7 +38,6 @@ function App() {
     keyboardMode: localStorage.getItem("keyboardMode") || "landscape",
     useProxy: true,
     enableTts: true,
-    visualizerBars: 16,
     systemPrompt: "Translator mode",
     themeColor: resolveThemeColor(),
   })
@@ -78,10 +65,13 @@ function App() {
   }, [config.keyboardMode])
 
   useEffect(() => {
-    if (config.themeColor) {
-      document.documentElement.style.setProperty('--bg-black', config.themeColor)
-      localStorage.setItem("themeColor", config.themeColor)
-    }
+    if (!config.themeColor) return
+    document.documentElement.style.setProperty("--bg-black", config.themeColor)
+    // The neutral theme is the one accent that also desaturates the aurora,
+    // so CSS needs to know about it, not just the hue.
+    document.documentElement.dataset.neutral =
+      config.themeColor.toLowerCase() === NEUTRAL_ACCENT ? "true" : "false"
+    localStorage.setItem("themeColor", config.themeColor)
   }, [config.themeColor])
 
   return (
