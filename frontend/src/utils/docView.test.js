@@ -38,6 +38,28 @@ describe("computeDocView", () => {
     expect(view.isLive).toBe(false)
   })
 
+  it("exposes the unconfirmed tail of a live entry separately", () => {
+    const view = computeDocView([
+      { kind: "transcription", transcript: "hola cómo", pending: "estás", live: true },
+    ])
+    expect(view.leftText).toBe("hola cómo")
+    expect(view.leftPending).toBe("estás")
+  })
+
+  it("ignores pending text once the entry is no longer live", () => {
+    const view = computeDocView([
+      { kind: "transcription", transcript: "hola cómo", pending: "estás", live: false },
+    ])
+    expect(view.leftPending).toBe("")
+  })
+
+  it("has no pending text when nothing is streaming", () => {
+    const view = computeDocView([
+      { kind: "translation", transcript: "Hello", translation: "Hola" },
+    ])
+    expect(view.leftPending).toBe("")
+  })
+
   it("flags the conversation as live when the last entry is live", () => {
     expect(
       computeDocView([{ kind: "transcription", live: true, transcript: "x" }])
@@ -77,5 +99,22 @@ describe("computeFloatView", () => {
     expect(view.label).toBe("English")
     expect(view.text).toBe("Hello Live")
     expect(view.isLive).toBe(true)
+  })
+
+  it("forwards the unconfirmed tail in transcription mode", () => {
+    const view = computeFloatView(
+      [{ kind: "transcription", sourceName: "English", transcript: "hola", pending: "cómo", live: true }],
+      "transcription",
+    )
+    expect(view.text).toBe("hola")
+    expect(view.pending).toBe("cómo")
+  })
+
+  it("never shows pending text in translation mode", () => {
+    const view = computeFloatView(
+      [{ kind: "transcription", sourceName: "English", transcript: "hola", pending: "cómo", live: true }],
+      "translation",
+    )
+    expect(view.pending).toBe("")
   })
 })

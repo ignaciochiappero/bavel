@@ -15,15 +15,31 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from "react"
+import {
+  X,
+  Play,
+  Square,
+  Volume2,
+  VolumeX,
+  Languages,
+  Captions,
+} from "lucide-react"
 import LanguageLane from "./components/LanguageLane"
 import TranscriptPanel from "./components/TranscriptPanel"
 import Visualizer from "./components/Visualizer"
 import { useAudioRecorder } from "./hooks/useAudioRecorder"
 import { useTabAudioCapture } from "./hooks/useTabAudioCapture"
+import { useReadiness } from "./hooks/useReadiness"
 import { openFloatingWindow } from "./utils/floatingWindow"
+import { createLocalAgreement } from "./utils/localAgreement"
+import { createTranslationSegmenter } from "./utils/translationSegmenter"
+import { drainQueue } from "./utils/audioQueue"
 import {
   transcribeAudio,
   translateText,
+  translateTextStream,
+  translateFast,
+  buildPlainTranslationPrompt,
   splitTextIntoSpeechChunks,
   listSessions,
   createSession,
@@ -31,6 +47,7 @@ import {
   sttStreamStart,
   sttStreamAppend,
   sttStreamStop,
+  warmupPair,
 } from "./utils/api"
 import { playBlip } from "./utils/audio-blip"
 
@@ -47,6 +64,46 @@ const AVAILABLE_LANGUAGES = [
   { code: "zh", name: "Chinese", voice: "tts", ttsLang: "zh" },
   { code: "ko", name: "Korean", voice: "tts", ttsLang: "ko" },
 ]
+
+// Strict-JSON translation prompt, shared by the one-shot (push-to-talk) path
+// and the streaming segment path so both produce identical wording.
+function buildTranslationPrompt(srcName, dstName) {
+  const from = srcName.split(" ")[0]
+  const to = dstName.split(" ")[0]
+  return `You are a high-performance translator. Your task is to translate text from ${from} into ${to}.\nYou MUST format your response as a valid JSON object matching this structure:\n{\n  "translation": "High-quality, natural translation into ${to}"\n}\nDo NOT return anything else except this JSON object. No Markdown block wraps (no \`\`\`json), no introductory text, no conversational text. Start directly with "{" and end directly with "}".`
+}
+
+// Emission policy for streaming translation: hold confirmed words until they
+// form a clause worth sending to the LLM.
+//
+// minWords is THE latency knob, measured on the real stack with a 17s
+// monologue: at 5 the first clause was released after 3.23s (it had to wait
+// for "...joining the call today."), at 3 after 1.37s ("Good morning,
+// everyone." — already a translatable clause). Time to first visible token
+// went 3.68s -> 1.82s for the cost of one extra segment. Below 3 there was no
+// further gain, since the first sentence boundary sits at word three.
+const SEGMENTER_OPTIONS = { minWords: 3, maxWords: 24 }
+
+// Human-readable summary of which models are still loading, so the warm-up
+// banner says what is happening rather than just spinning.
+const WARMUP_LABELS = { stt: "transcripción", tts: "voz", translation: "traducción" }
+
+function formatWarmupDetail(components = {}, busy = []) {
+  // An in-flight lazy load is the specific thing worth naming — that is the
+  // one that takes tens of seconds.
+  if (busy.length > 0) {
+    return `(${busy.map((b) => b.detail || WARMUP_LABELS[b.kind] || b.kind).join(", ")})`
+  }
+  const pending = Object.entries(components)
+    .filter(([, state]) => state !== "ready" && state !== "error")
+    .map(([name]) => WARMUP_LABELS[name] || name)
+  return pending.length > 0 ? `(${pending.join(", ")})` : ""
+}
+
+// Backpressure ceiling for the tab-listening queue: 30 s of 16 kHz mono audio.
+// Queued chunks are merged rather than dropped, so this only bites when the
+// pipeline has fallen catastrophically behind.
+const MAX_QUEUED_SAMPLES = 16000 * 30
 
 function TranslatorApp({ config, onOpenSettings }) {
   // UI State
@@ -75,7 +132,18 @@ function TranslatorApp({ config, onOpenSettings }) {
     voiceOnRef.current = voiceOn
   }, [voiceOn])
 
-  // Active Moonshine streaming session: { id, liveKey } or null.
+  // Active Moonshine streaming session, or null:
+  //   { id, liveKey, src, dst, agreement, segmenter }
+  //
+  // `agreement` is the LocalAgreement-2 policy: Moonshine may revise its
+  // hypothesis on every append, so only the prefix two consecutive hypotheses
+  // agree on is committed. The rest renders as tentative text instead of
+  // making the whole paragraph flicker.
+  //
+  // `segmenter` exists only in translation mode. It holds confirmed words
+  // until they form a clause, then releases them to the translator — so the
+  // translation column fills in while the person is still speaking, without
+  // one LLM request per word.
   const sttStreamRef = useRef(null)
 
   // Floating Picture-in-Picture window (translations over other tabs).
@@ -129,6 +197,23 @@ function TranslatorApp({ config, onOpenSettings }) {
     stopCapture: stopTabCapture,
     analyser: tabAnalyser,
   } = useTabAudioCapture()
+
+  // Model warm-up state. The heavy models load in the background at boot;
+  // surfacing that is the difference between "preparing" and "this is slow".
+  const readiness = useReadiness()
+
+  // Preload whatever pair the lanes currently point at. Only en->es is
+  // prewarmed at boot, and first use of another pair costs seconds (26.66s
+  // measured for es->en), so pay it while the user is still setting up rather
+  // than in the middle of a sentence.
+  useEffect(() => {
+    const src = AVAILABLE_LANGUAGES[lang1Index]
+    const dst = AVAILABLE_LANGUAGES[lang2Index]
+    if (!src || !dst) return
+    // Both directions: either lane can be the speaker.
+    warmupPair(src.code, dst.code).catch(() => {})
+    warmupPair(dst.code, src.code).catch(() => {})
+  }, [lang1Index, lang2Index])
 
   // Synced AFTER the hook: reading isTabCapturing in a deps array before its
   // declaration would throw a temporal-dead-zone error at render.
@@ -298,11 +383,22 @@ function TranslatorApp({ config, onOpenSettings }) {
         }
 
         // 2. Translation
-        const result = await translateText(transcribedText, {
-          ...config,
-          modelName: config.modelName,
-          systemPrompt: `You are a high-performance translator. Your task is to translate text from ${src.name.split(" ")[0]} into ${dst.name.split(" ")[0]}.\nYou MUST format your response as a valid JSON object matching this structure:\n{\n  "translation": "High-quality, natural translation into ${dst.name.split(" ")[0]}"\n}\nDo NOT return anything else except this JSON object. No Markdown block wraps (no \`\`\`json), no introductory text, no conversational text. Start directly with "{" and end directly with "}".`,
-        })
+        // Push-to-talk uses the same fast NMT engine as tab listening; the
+        // LLM stays as a fallback for pairs Argos cannot serve. This path used
+        // to be the slow one (JSON prompt, no streaming) — measured 1.76s per
+        // sentence against Argos's 61ms.
+        let result
+        try {
+          const fast = await translateFast(transcribedText, src.code, dst.code)
+          result = { translation: fast.text, duration: (fast.ms / 1000).toFixed(2), tokens: 0 }
+        } catch (fastErr) {
+          console.warn("Fast translation unavailable, falling back to the LLM:", fastErr)
+          result = await translateText(transcribedText, {
+            ...config,
+            modelName: config.modelName,
+            systemPrompt: buildTranslationPrompt(src.name, dst.name),
+          })
+        }
 
         setTranslationData((prev) => ({ ...prev, text: result.translation }))
         setMetaText(`Duration: ${result.duration}s | Tokens: ${result.tokens}`)
@@ -339,25 +435,126 @@ function TranslatorApp({ config, onOpenSettings }) {
     [config, lang1Index, lang2Index, playTTS, isTabCapturing],
   )
 
+  // Translation runs OFF the audio loop.
+  //
+  // Measured on the real stack: STT 14.89s + LLM 10.48s summed to exactly the
+  // 25.37s pipeline, i.e. zero overlap — awaiting the translator inside the
+  // append loop stalled transcription. Segments are now chained on their own
+  // promise so they still translate IN ORDER, while the audio loop keeps
+  // feeding Moonshine.
+  const translationChainRef = useRef(Promise.resolve())
+  // Translated text committed so far for the live entry, so a streaming
+  // segment can append to it without re-reading React state.
+  const translatedSoFarRef = useRef("")
+
+  // Translates one confirmed segment into the live entry's translation column.
+  //
+  // Argos (dedicated NMT) answers in ~61ms, so the segment simply appears —
+  // no token streaming needed. The LLM path stays as a fallback for language
+  // pairs Argos has no package for.
+  const translateSegment = useCallback(
+    async (segment, src, dst, liveKey) => {
+      const base = translatedSoFarRef.current
+      const withBase = (piece) => (base ? `${base} ${piece}` : piece)
+      const paint = (piece) => {
+        setConversation((prev) =>
+          prev.map((m) =>
+            m.key === liveKey ? { ...m, translation: withBase(piece) } : m,
+          ),
+        )
+        setTranslationData((prev) => ({ ...prev, text: withBase(piece) }))
+      }
+
+      let piece = ""
+      try {
+        const fast = await translateFast(segment, src.code, dst.code)
+        piece = (fast.text || "").trim()
+      } catch (err) {
+        console.warn("Fast translation unavailable, falling back to the LLM:", err)
+        try {
+          const slow = await translateTextStream(
+            segment,
+            {
+              ...config,
+              modelName: config.modelName,
+              systemPrompt: buildPlainTranslationPrompt(src.name, dst.name),
+            },
+            (partial) => paint(partial),
+          )
+          piece = (slow || "").trim()
+        } catch (err2) {
+          // One failed segment must not abort the utterance.
+          console.error("Segment translation failed:", err2)
+          return
+        }
+      }
+
+      if (!piece) return
+      translatedSoFarRef.current = withBase(piece)
+      paint(piece)
+    },
+    [config],
+  )
+
+  // Queues a segment behind the ones already translating. Returns immediately
+  // so the caller (the audio loop) is never blocked.
+  const enqueueTranslation = useCallback(
+    (segment, src, dst, liveKey) => {
+      translationChainRef.current = translationChainRef.current.then(() =>
+        translateSegment(segment, src, dst, liveKey),
+      )
+      return translationChainRef.current
+    },
+    [translateSegment],
+  )
+
   // Commit the active streaming transcript (silence detected, capture
   // stopped, mode switched, or session cleared).
   const finalizeLiveStream = useCallback(async () => {
     const stream = sttStreamRef.current
     if (!stream) return
     sttStreamRef.current = null
-    try {
-      const res = await sttStreamStop(stream.id)
+
+    // Commit whatever is still tentative. On success the backend's final
+    // transcript wins; on failure we keep the text LocalAgreement had already
+    // accumulated. Either way the entry stops being live, so the caret and
+    // the dimmed tail never linger.
+    const settle = async (finalText) => {
+      const { committed, newlyCommitted } = stream.agreement.flush(finalText)
       setConversation((prev) =>
         prev.map((m) =>
           m.key === stream.liveKey
-            ? { ...m, transcript: res.text || m.transcript, live: false }
+            ? { ...m, transcript: committed || m.transcript, pending: "", live: false }
             : m,
         ),
       )
+
+      // Translation mode: the segmenter may still hold words that never
+      // reached a clause boundary. End of utterance releases them.
+      if (stream.segmenter) {
+        const tail = [
+          ...stream.segmenter.push(newlyCommitted),
+          ...stream.segmenter.flush(),
+        ]
+        for (const segment of tail) {
+          enqueueTranslation(segment, stream.src, stream.dst, stream.liveKey)
+        }
+      }
+      // The transcript is settled, so the caret is already gone. Segments
+      // queued earlier may still be translating, though: wait for the chain
+      // so callers (stop capture, mode switch, new call) do not race ahead of
+      // translations that are still painting into this entry.
+      await translationChainRef.current
+    }
+
+    try {
+      const res = await sttStreamStop(stream.id)
+      await settle(res.text || undefined)
     } catch (err) {
       console.error("Stream finalize failed:", err)
+      await settle()
     }
-  }, [])
+  }, [enqueueTranslation])
 
   // Save the whole conversation as a session (SQLite via the backend).
   const handleSave = useCallback(async () => {
@@ -440,58 +637,53 @@ function TranslatorApp({ config, onOpenSettings }) {
     }
   }, [finalizeLiveStream])
 
-  // Continuous auto-translate loop for tab listening mode. In transcription
-  // mode each chunk feeds a Moonshine STREAM (incremental partial text);
-  // otherwise chunks go through the one-shot STT + translation pipeline.
-  const handleTabChunk = useCallback(
-    async ({ base64Data, final }) => {
-      tabQueueRef.current.push({ base64Data, final })
-      if (tabProcessingRef.current) return
-      tabProcessingRef.current = true
-      while (tabQueueRef.current.length > 0) {
-        const chunk = tabQueueRef.current.shift()
-        try {
-          if (transcribeModeRef.current === "transcription") {
-            await processStreamChunk(chunk)
-          } else {
-            await processTranslation(activePersonRef.current, chunk.base64Data)
-          }
-        } catch (err) {
-          console.error("Tab chunk processing failed:", err)
-        }
-      }
-      tabProcessingRef.current = false
-    },
-    [processTranslation],
-  )
-
-  // One streaming chunk: start the stream on the first piece of an
-  // utterance, append audio (gets partial text back), stop on silence.
+  // One streaming cycle: open the Moonshine stream on the first chunk of an
+  // utterance, append audio (which returns a revised FULL hypothesis), run it
+  // through LocalAgreement, and — in translation mode — release confirmed
+  // clauses to the translator as they close, so the translation column grows
+  // while the person is still talking.
   const processStreamChunk = useCallback(
     async ({ base64Data, final }) => {
+      const translating = transcribeModeRef.current !== "transcription"
+
       if (!sttStreamRef.current) {
-        const srcIndex =
-          activePersonRef.current === 1
-            ? lang1IndexRef.current
-            : lang2IndexRef.current
-        const srcLang = AVAILABLE_LANGUAGES[srcIndex]
+        const lane = activePersonRef.current
+        const srcIndex = lane === 1 ? lang1IndexRef.current : lang2IndexRef.current
+        const dstIndex = lane === 1 ? lang2IndexRef.current : lang1IndexRef.current
+        const src = AVAILABLE_LANGUAGES[srcIndex]
+        const dst = AVAILABLE_LANGUAGES[dstIndex]
         try {
-          const { stream_id } = await sttStreamStart(srcLang.code)
+          const { stream_id } = await sttStreamStart(src.code)
           const key = ++messageKeyRef.current
           setConversation((prev) => [
             ...prev,
             {
               key,
-              kind: "transcription",
+              kind: translating ? "translation" : "transcription",
               live: true,
-              sourceName: srcLang.name,
-              sourceCode: srcLang.code,
+              sourceName: src.name,
+              sourceCode: src.code,
+              targetName: translating ? dst.name : undefined,
+              targetCode: translating ? dst.code : undefined,
               transcript: "",
+              pending: "",
+              translation: "",
               ts: new Date().toISOString(),
             },
           ])
           setSaveState((s) => (s === "saved" ? "dirty" : s))
-          sttStreamRef.current = { id: stream_id, liveKey: key }
+          translatedSoFarRef.current = ""
+          sttStreamRef.current = {
+            id: stream_id,
+            liveKey: key,
+            src,
+            dst,
+            agreement: createLocalAgreement({ n: 2 }),
+            // Only translation mode needs an emission policy.
+            segmenter: translating
+              ? createTranslationSegmenter(SEGMENTER_OPTIONS)
+              : null,
+          }
         } catch (err) {
           console.error("Stream start failed, falling back to one-shot:", err)
           await processTranslation(activePersonRef.current, base64Data)
@@ -504,15 +696,29 @@ function TranslatorApp({ config, onOpenSettings }) {
 
       try {
         const res = await sttStreamAppend(stream.id, base64Data)
+        // Raw hypothesis -> stable prefix + tentative tail.
+        const { committed, pending, newlyCommitted } = stream.agreement.update(
+          res.text,
+        )
         // Capture the live key BEFORE the updater runs: React defers state
         // updaters to the next render, and finalizeLiveStream may have
         // nulled sttStreamRef by then (reading it here would crash).
         const liveKey = stream.liveKey
         setConversation((prev) =>
           prev.map((m) =>
-            m.key === liveKey ? { ...m, transcript: res.text } : m,
+            m.key === liveKey ? { ...m, transcript: committed, pending } : m,
           ),
         )
+
+        // Translation mode: newly confirmed words go to the segmenter, which
+        // releases them only once they form a clause worth translating.
+        if (stream.segmenter && newlyCommitted) {
+          for (const segment of stream.segmenter.push(newlyCommitted)) {
+            // Fire-and-forget on purpose: the chain keeps them ordered while
+            // this loop goes straight back to feeding audio.
+            enqueueTranslation(segment, stream.src, stream.dst, liveKey)
+          }
+        }
       } catch (err) {
         console.error("Stream append failed:", err)
         await finalizeLiveStream()
@@ -524,7 +730,48 @@ function TranslatorApp({ config, onOpenSettings }) {
         await finalizeLiveStream()
       }
     },
-    [finalizeLiveStream, processTranslation],
+    [finalizeLiveStream, processTranslation, enqueueTranslation],
+  )
+
+  // Continuous listening loop for tab capture. Both modes now feed the same
+  // Moonshine STREAM; the mode only decides whether confirmed text also gets
+  // translated (see processStreamChunk).
+  //
+  // Backpressure: the VAD produces a chunk per second, but a full STT +
+  // translation round trip takes longer. Draining the queue one chunk at a
+  // time made the backlog — and therefore the delay behind the speaker — grow
+  // without bound. Every queued chunk is now MERGED into a single append, so
+  // no audio is lost and the recognizer runs once per cycle instead of once
+  // per chunk.
+  const handleTabChunk = useCallback(
+    async ({ base64Data, final }) => {
+      tabQueueRef.current.push({ base64Data, final })
+      if (tabProcessingRef.current) return
+      tabProcessingRef.current = true
+      try {
+        while (tabQueueRef.current.length > 0) {
+          const merged = drainQueue(tabQueueRef.current, {
+            maxSamples: MAX_QUEUED_SAMPLES,
+          })
+          if (!merged) break
+          if (merged.droppedSamples > 0) {
+            console.warn(
+              `[tab] pipeline is ${Math.round(merged.droppedSamples / 16000)}s behind — dropped the oldest audio`,
+            )
+          }
+          try {
+            await processStreamChunk(merged)
+          } catch (err) {
+            console.error("Tab chunk processing failed:", err)
+          }
+        }
+      } finally {
+        // Always release the lock: an unhandled throw here would freeze tab
+        // listening until the page is reloaded.
+        tabProcessingRef.current = false
+      }
+    },
+    [processStreamChunk],
   )
 
   // Mouse-driven language pick: the two lanes may never share a language.
@@ -745,8 +992,9 @@ function TranslatorApp({ config, onOpenSettings }) {
             <button
               className="overlay-close-btn"
               onClick={() => setHistoryOpen(false)}
+              aria-label="Cerrar"
             >
-              ✕
+              <X size={16} strokeWidth={1.75} />
             </button>
           </header>
           <div className="history-list">
@@ -776,20 +1024,43 @@ function TranslatorApp({ config, onOpenSettings }) {
             className={`capture-mode-btn ${isTabCapturing ? "active" : ""}`}
             onClick={toggleTabListening}
           >
-            {isTabCapturing ? "■ Detener" : "▶ Escuchar pestaña"}
+            {isTabCapturing ? (
+              <>
+                <Square size={13} strokeWidth={2} fill="currentColor" />
+                <span>Detener</span>
+              </>
+            ) : (
+              <>
+                <Play size={13} strokeWidth={2} fill="currentColor" />
+                <span>Escuchar pestaña</span>
+              </>
+            )}
           </button>
-          <div className="segmented">
+          <div
+            className="segmented"
+            data-mode={transcribeMode}
+          >
+            {/* Liquid indicator: two stacked blobs under the #gooey filter.
+                The trailing one lags behind, so during the slide they stretch
+                into a single droplet and then snap back together. Labels live
+                OUTSIDE this layer so the text stays sharp. */}
+            <span className="seg-liquid" aria-hidden="true">
+              <span className="seg-blob" />
+              <span className="seg-blob seg-blob-trail" />
+            </span>
             <button
               className={`seg-btn ${transcribeMode === "translation" ? "active" : ""}`}
               onClick={() => handleSetTranscribeMode("translation")}
             >
-              Traducción
+              <Languages size={13} strokeWidth={1.75} />
+              <span>Traducción</span>
             </button>
             <button
               className={`seg-btn ${transcribeMode === "transcription" ? "active" : ""}`}
               onClick={() => handleSetTranscribeMode("transcription")}
             >
-              Transcripción
+              <Captions size={13} strokeWidth={1.75} />
+              <span>Transcripción</span>
             </button>
           </div>
           <button
@@ -797,8 +1068,18 @@ function TranslatorApp({ config, onOpenSettings }) {
             onClick={() => setVoiceOn((v) => !v)}
             title="Voz"
           >
-            {voiceOn ? "🔊" : "🔇"}
+            {voiceOn ? (
+              <Volume2 size={15} strokeWidth={1.75} />
+            ) : (
+              <VolumeX size={15} strokeWidth={1.75} />
+            )}
           </button>
+          {readiness.known && !readiness.ready && (
+            <span className="warmup-indicator" role="status" aria-live="polite">
+              <span className="warmup-dot" />
+              Preparando modelos… {formatWarmupDetail(readiness.components, readiness.busy)}
+            </span>
+          )}
           <span className="capture-mode-hint">
             {isTabCapturing
               ? transcribeMode === "transcription"

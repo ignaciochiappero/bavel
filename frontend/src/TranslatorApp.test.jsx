@@ -36,6 +36,25 @@ vi.mock("./utils/audio-blip", () => ({
   playBlip: vi.fn(),
 }))
 
+// The app preloads its language pair and polls readiness on mount; jsdom has
+// no fetch, so stub the client rather than let those reject in the console.
+vi.mock("./utils/api", () => ({
+  transcribeAudio: vi.fn(),
+  translateText: vi.fn(),
+  translateTextStream: vi.fn(),
+  translateFast: vi.fn(),
+  buildPlainTranslationPrompt: () => "",
+  splitTextIntoSpeechChunks: vi.fn(() => []),
+  listSessions: vi.fn(async () => []),
+  createSession: vi.fn(async () => ({ id: 1 })),
+  getSessionMessages: vi.fn(async () => ({ messages: [] })),
+  sttStreamStart: vi.fn(),
+  sttStreamAppend: vi.fn(),
+  sttStreamStop: vi.fn(),
+  warmupPair: vi.fn(async () => ({ warming: true })),
+  getReadiness: vi.fn(async () => ({ ready: true, components: {}, busy: [] })),
+}))
+
 // jsdom has no 2D canvas context; the visualizer is not under test here.
 vi.mock("./components/Visualizer", () => ({
   default: () => <div data-testid="visualizer" />,

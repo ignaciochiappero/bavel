@@ -10,6 +10,8 @@ import {
   sttStreamStart,
   sttStreamAppend,
   sttStreamStop,
+  translateTextStream,
+  sanitizeTranslation,
 } from "./api"
 
 function jsonResponse(body, status = 200) {
@@ -191,5 +193,102 @@ describe("streaming STT API", () => {
     const res = await sttStreamStop(1)
     expect(res.done).toBe(true)
     expect(global.fetch.mock.calls[0][0]).toBe("/api/stt/stream/stop")
+  })
+})
+
+describe("sanitizeTranslation", () => {
+  it("returns plain text untouched", () => {
+    expect(sanitizeTranslation("Hola, ¿cómo estás?")).toBe("Hola, ¿cómo estás?")
+  })
+
+  it("drops a leading 'Here is the translation:' preamble", () => {
+    expect(sanitizeTranslation("Here is the translation: Hola")).toBe("Hola")
+    expect(sanitizeTranslation("Translation: Hola")).toBe("Hola")
+  })
+
+  it("drops a language label line", () => {
+    expect(sanitizeTranslation("**Spanish:** Hola mundo")).toBe("Hola mundo")
+  })
+
+  it("strips surrounding quotes", () => {
+    expect(sanitizeTranslation('"Hola mundo"')).toBe("Hola mundo")
+  })
+
+  it("strips model control tokens", () => {
+    expect(sanitizeTranslation("<|im_start|>Hola<|im_end|>")).toBe("Hola")
+  })
+
+  it("handles empty input", () => {
+    expect(sanitizeTranslation("")).toBe("")
+    expect(sanitizeTranslation(null)).toBe("")
+  })
+})
+
+describe("translateTextStream", () => {
+  // Builds a fetch Response whose body streams the given SSE frames.
+  function sseResponse(frames) {
+    const encoder = new TextEncoder()
+    let i = 0
+    return {
+      ok: true,
+      status: 200,
+      body: {
+        getReader: () => ({
+          read: async () =>
+            i < frames.length
+              ? { done: false, value: encoder.encode(frames[i++]) }
+              : { done: true, value: undefined },
+        }),
+      },
+      text: async () => "",
+    }
+  }
+
+  const delta = (c) => `data: ${JSON.stringify({ choices: [{ delta: { content: c } }] })}\n\n`
+  const cfg = { endpointUrl: "http://localhost:9379/v1", useProxy: true, modelName: "m", systemPrompt: "p" }
+
+  beforeEach(() => {
+    global.fetch = vi.fn()
+  })
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it("accumulates deltas and reports partials as they arrive", async () => {
+    global.fetch.mockResolvedValue(
+      sseResponse([delta("Hola"), delta(" mundo"), "data: [DONE]\n\n"]),
+    )
+    const partials = []
+    const out = await translateTextStream("Hello world", cfg, (p) => partials.push(p))
+    expect(out).toBe("Hola mundo")
+    expect(partials).toEqual(["Hola", "Hola mundo"])
+  })
+
+  it("requests stream:true through the proxy", async () => {
+    global.fetch.mockResolvedValue(sseResponse([delta("x"), "data: [DONE]\n\n"]))
+    await translateTextStream("hi", cfg, () => {})
+    const [url, init] = global.fetch.mock.calls[0]
+    expect(url).toContain("/proxy?url=")
+    expect(JSON.parse(init.body).stream).toBe(true)
+  })
+
+  it("survives an SSE frame split across two reads", async () => {
+    const frame = delta("Hola")
+    global.fetch.mockResolvedValue(
+      sseResponse([frame.slice(0, 12), frame.slice(12), "data: [DONE]\n\n"]),
+    )
+    expect(await translateTextStream("hi", cfg, () => {})).toBe("Hola")
+  })
+
+  it("ignores malformed frames instead of throwing", async () => {
+    global.fetch.mockResolvedValue(
+      sseResponse(["data: {not json}\n\n", delta("Hola"), "data: [DONE]\n\n"]),
+    )
+    expect(await translateTextStream("hi", cfg, () => {})).toBe("Hola")
+  })
+
+  it("throws on a non-ok response", async () => {
+    global.fetch.mockResolvedValue({ ok: false, status: 500, text: async () => "boom" })
+    await expect(translateTextStream("hi", cfg, () => {})).rejects.toThrow(/500/)
   })
 })
