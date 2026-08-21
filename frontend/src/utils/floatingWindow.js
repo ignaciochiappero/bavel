@@ -1,4 +1,9 @@
 import { computeFloatView } from "./docView"
+// Vite rewrites these to fingerprinted URLs. The pip document is same-origin
+// but does NOT inherit the opener's @font-face rules, so they are redeclared
+// below against these exact URLs.
+import blenderBook from "../assets/fonts/BlenderPro-Book.woff"
+import blenderMedium from "../assets/fonts/BlenderPro-Medium.woff"
 
 // Floating translations window: a Document Picture-in-Picture window that
 // stays on top of everything (e.g. over a Meet call in another tab).
@@ -12,23 +17,107 @@ import { computeFloatView } from "./docView"
 // translation; transcription mode shows only the source text. The text body
 // auto-scrolls to the bottom on every update.
 
+// Glass styling for the pip window.
+//
+// NOTE ON REAL TRANSPARENCY: a Document Picture-in-Picture window cannot be
+// see-through to the desktop — the browser paints its own opaque background
+// and no CSS can punch through it. So the glass here is *simulated*: a dark
+// ground, a blurred colour wash drifting underneath, a translucent pane with a
+// bright top edge, and a specular sheen. It reads as frosted glass sitting on
+// top of other windows, which is the effect asked for, without pretending to a
+// capability the platform does not expose.
 const FLOAT_CSS = `
-  * { box-sizing: border-box; margin: 0; padding: 0;
-      font-family: "Roboto Mono", "Courier New", monospace; }
-  body { background: #ffa500; color: #000; overflow: hidden; }
-  .float-root { height: 100vh; display: flex; flex-direction: column;
-                padding: 8px 10px; gap: 4px; }
-  .float-title { font-size: 11px; font-weight: 700; letter-spacing: 0.08em;
-                 text-transform: uppercase; opacity: 0.85; }
-  .float-body { flex: 1; overflow-y: auto; }
-  .float-label { font-size: 10px; font-weight: 700; text-transform: uppercase;
-                 letter-spacing: 0.06em; margin-bottom: 3px; }
-  .float-text { font-size: 14px; line-height: 1.4; word-break: break-word;
-                white-space: pre-wrap; }
-  .live-caret { display: inline-block; width: 7px; height: 12px; margin-left: 3px;
-                background: #000; vertical-align: text-bottom;
-                animation: caret 1s steps(2, start) infinite; }
-  @keyframes caret { 0% { opacity: 1; } 50% { opacity: 0; } 100% { opacity: 1; } }
+  @font-face {
+    font-family: "Blender Pro"; src: url("${blenderBook}") format("woff");
+    font-weight: 400; font-style: normal; font-display: block;
+  }
+  @font-face {
+    font-family: "Blender Pro"; src: url("${blenderMedium}") format("woff");
+    font-weight: 500; font-style: normal; font-display: block;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-font-smoothing: antialiased; }
+  :root {
+    --accent: #6c8cff;
+    --ink: rgba(255,255,255,0.96);
+    --ink-dim: rgba(255,255,255,0.42);
+    --font-ui: "Blender Pro", -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, system-ui, sans-serif;
+    --font-mono: "Roboto Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  body {
+    background: #07080d;
+    color: var(--ink);
+    overflow: hidden;
+    font-family: var(--font-ui);
+    height: 100vh;
+  }
+  /* Colour wash drifting behind the pane — this is what the blur refracts. */
+  body::before, body::after {
+    content: ""; position: fixed; border-radius: 50%;
+    filter: blur(56px); opacity: 0.55; pointer-events: none;
+    will-change: transform;
+  }
+  body::before {
+    width: 90vw; height: 90vw; top: -46vw; left: -26vw;
+    background: radial-gradient(circle, var(--accent), transparent 68%);
+    animation: fdrift-a 26s cubic-bezier(0.22,1,0.36,1) infinite alternate;
+  }
+  body::after {
+    width: 78vw; height: 78vw; right: -34vw; bottom: -40vw;
+    background: radial-gradient(circle, #ff7ac6, transparent 66%);
+    animation: fdrift-b 31s cubic-bezier(0.22,1,0.36,1) infinite alternate;
+  }
+  @keyframes fdrift-a { to { transform: translate3d(14vw, 10vh, 0) scale(1.2); } }
+  @keyframes fdrift-b { to { transform: translate3d(-12vw, -8vh, 0) scale(1.14); } }
+
+  .float-root {
+    position: relative; height: 100vh; display: flex; flex-direction: column;
+    gap: 8px; padding: 12px 14px 14px;
+    background: rgba(255,255,255,0.07);
+    backdrop-filter: blur(30px) saturate(160%);
+    -webkit-backdrop-filter: blur(30px) saturate(160%);
+    border-top: 1px solid rgba(255,255,255,0.22);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.12);
+  }
+  /* Specular sheen across the top — the tell that sells "glass". */
+  .float-root::before {
+    content: ""; position: absolute; inset: 0 0 auto 0; height: 45%;
+    background: linear-gradient(to bottom, rgba(255,255,255,0.09), transparent);
+    pointer-events: none;
+  }
+  .float-title {
+    position: relative; font-size: 9px; font-weight: 600;
+    letter-spacing: 0.26em; text-transform: uppercase;
+    color: rgba(255,255,255,0.5);
+  }
+  .float-body {
+    position: relative; flex: 1; overflow-y: auto;
+    scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.16) transparent;
+  }
+  .float-body::-webkit-scrollbar { width: 5px; }
+  .float-body::-webkit-scrollbar-thumb {
+    background: rgba(255,255,255,0.16); border-radius: 999px;
+  }
+  .float-label {
+    font-size: 9px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.2em; color: rgba(255,255,255,0.38); margin-bottom: 6px;
+  }
+  .float-text {
+    font-family: var(--font-mono);
+    font-size: 14px; line-height: 1.62; word-break: break-word;
+    white-space: pre-wrap; color: var(--ink);
+  }
+  .float-pending { color: var(--ink-dim); font-style: italic; }
+  .live-caret {
+    display: inline-block; width: 2px; height: 1em; margin-left: 4px;
+    border-radius: 2px; vertical-align: text-bottom;
+    background: var(--accent); box-shadow: 0 0 10px var(--accent);
+    animation: caret 1.15s cubic-bezier(0.22,1,0.36,1) infinite;
+  }
+  @keyframes caret { 0%,100% { opacity: 1; } 50% { opacity: 0.12; } }
+
+  @media (prefers-reduced-motion: reduce) {
+    body::before, body::after, .live-caret { animation: none; }
+  }
 `
 
 // Renders the mode-aware single-column document into `root`, creating every
@@ -45,7 +134,14 @@ function renderFloat(root, payload, doc) {
   label.textContent = view.label
   const text = doc.createElement("div")
   text.className = "float-text"
-  text.textContent = view.text || "—"
+  text.textContent = view.text || (view.pending ? "" : "—")
+  // Tentative tail (not yet confirmed by LocalAgreement) — dimmed.
+  if (view.pending) {
+    const pending = doc.createElement("span")
+    pending.className = "float-pending"
+    pending.textContent = `${view.text ? " " : ""}${view.pending}`
+    text.appendChild(pending)
+  }
   if (view.isLive) {
     const caret = doc.createElement("span")
     caret.className = "live-caret"

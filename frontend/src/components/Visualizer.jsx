@@ -16,9 +16,15 @@
 
 import React, { useEffect, useRef } from "react"
 
-// Dual-canvas frequency-bar visualizer sitting between the lanes and the
-// result drawer. While recording, the active person's canvas animates from
-// the shared AnalyserNode; the inactive one shows a flat baseline.
+// Liquid level meter sitting under the language lanes.
+//
+// Draws soft round-capped columns rather than rectangles: the #liquid SVG
+// filter (see index.html) blurs the canvas and crushes its alpha, so rounded
+// neighbours bleed into one another and read as a single body of fluid.
+// Square bars would just come back square, which is why the shape matters.
+//
+// Colour is read from the --accent custom property so the theme picker keeps
+// working, and it is re-read on every mount rather than hard-coded.
 export default function Visualizer({
   activePerson,
   isRecording,
@@ -29,27 +35,6 @@ export default function Visualizer({
   const canvas2Ref = useRef(null)
   const animationRef = useRef(null)
 
-  const drawStaticWaveform = (ctx, canvas) => {
-    ctx.clearRect(0, 0, canvas.width, canvas.height)
-    ctx.lineWidth = 1
-    ctx.strokeStyle = "#000000"
-    ctx.beginPath()
-    ctx.moveTo(0, canvas.height)
-    ctx.lineTo(canvas.width, canvas.height)
-    ctx.stroke()
-
-    const numBars = barsCount || 32
-    const barWidth = canvas.width / numBars - 1
-    let x = 0
-
-    for (let i = 0; i < numBars; i++) {
-      const barHeight = 1
-      ctx.fillStyle = "#000000"
-      ctx.fillRect(x, canvas.height - barHeight, barWidth, barHeight)
-      x += barWidth + 1
-    }
-  }
-
   useEffect(() => {
     const canvas1 = canvas1Ref.current
     const canvas2 = canvas2Ref.current
@@ -57,15 +42,47 @@ export default function Visualizer({
     const ctx1 = canvas1.getContext("2d")
     const ctx2 = canvas2.getContext("2d")
 
+    const styles = getComputedStyle(document.documentElement)
+    const accent = (styles.getPropertyValue("--accent") || "#6c8cff").trim()
+
+    const numBars = Math.max(6, parseInt(barsCount, 10) || 24)
+
+    // One column, as a round-capped line so the filter has curves to melt.
+    const column = (ctx, x, w, h, height, alpha) => {
+      const r = Math.min(w / 2, 5)
+      ctx.globalAlpha = alpha
+      ctx.strokeStyle = accent
+      ctx.lineWidth = w
+      ctx.lineCap = "round"
+      ctx.beginPath()
+      ctx.moveTo(x + w / 2, height - r)
+      ctx.lineTo(x + w / 2, Math.max(r, height - h))
+      ctx.stroke()
+      ctx.globalAlpha = 1
+    }
+
+    // Idle: a low, even ripple so the meter never looks dead.
+    const drawIdle = (ctx, canvas) => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+      const gap = 3
+      const w = canvas.width / numBars - gap
+      for (let i = 0; i < numBars; i++) {
+        column(ctx, i * (w + gap), w, 3, canvas.height, 0.28)
+      }
+    }
+
     if (!isRecording || !analyser) {
       if (animationRef.current) cancelAnimationFrame(animationRef.current)
-      drawStaticWaveform(ctx1, canvas1)
-      drawStaticWaveform(ctx2, canvas2)
+      drawIdle(ctx1, canvas1)
+      drawIdle(ctx2, canvas2)
       return
     }
 
     const bufferLength = analyser.frequencyBinCount
     const dataArray = new Uint8Array(bufferLength)
+    // Speech lives in the lower spectrum; the top quarter is mostly empty.
+    const maxBin = Math.floor(bufferLength * 0.75)
+    const binsPerBar = Math.max(1, Math.floor(maxBin / numBars))
 
     const draw = () => {
       animationRef.current = requestAnimationFrame(draw)
@@ -76,40 +93,20 @@ export default function Visualizer({
       const inactiveCtx = activePerson === 1 ? ctx2 : ctx1
       const inactiveCanvas = activePerson === 1 ? canvas2 : canvas1
 
-      drawStaticWaveform(inactiveCtx, inactiveCanvas)
+      drawIdle(inactiveCtx, inactiveCanvas)
 
       activeCtx.clearRect(0, 0, activeCanvas.width, activeCanvas.height)
-      activeCtx.strokeStyle = "#000000"
-      activeCtx.lineWidth = 1
-      activeCtx.beginPath()
-      activeCtx.moveTo(0, activeCanvas.height)
-      activeCtx.lineTo(activeCanvas.width, activeCanvas.height)
-      activeCtx.stroke()
-
-      const numBars = barsCount || 32
-      const barWidth = activeCanvas.width / numBars - 1
-      let x = 0
-
-      // Ignore the top quarter of the spectrum (mostly empty for speech).
-      const maxBin = Math.floor(bufferLength * 0.75)
-      const binsPerBar = Math.floor(maxBin / numBars)
+      const gap = 3
+      const w = activeCanvas.width / numBars - gap
 
       for (let i = 0; i < numBars; i++) {
         let sum = 0
         for (let j = 0; j < binsPerBar; j++) {
           sum += dataArray[i * binsPerBar + j]
         }
-        let average = sum / binsPerBar
-        let barHeight = (average / 255.0) * activeCanvas.height
-
-        activeCtx.fillStyle = "#000000"
-        activeCtx.fillRect(
-          x,
-          activeCanvas.height - barHeight,
-          barWidth,
-          barHeight,
-        )
-        x += barWidth + 1
+        const average = sum / binsPerBar
+        const h = Math.max(3, (average / 255) * (activeCanvas.height - 6))
+        column(activeCtx, i * (w + gap), w, h, activeCanvas.height, 0.95)
       }
     }
 
@@ -121,25 +118,12 @@ export default function Visualizer({
   }, [isRecording, analyser, barsCount, activePerson])
 
   return (
-    <section className="visualizer-divider" style={{ display: "flex" }}>
-      <div className="canvas-wrap lane-one" style={{ width: "50%" }}>
-        <canvas
-          ref={canvas1Ref}
-          width="240"
-          height="28"
-          style={{ display: "block", width: "100%" }}
-        ></canvas>
+    <section className="visualizer-divider" style={{ display: "flex", gap: "12px" }}>
+      <div className="canvas-wrap" style={{ flex: 1 }}>
+        <canvas ref={canvas1Ref} width="480" height="92" />
       </div>
-      <div
-        className="canvas-wrap lane-two"
-        style={{ width: "50%", position: "relative" }}
-      >
-        <canvas
-          ref={canvas2Ref}
-          width="240"
-          height="28"
-          style={{ display: "block", width: "100%" }}
-        ></canvas>
+      <div className="canvas-wrap" style={{ flex: 1 }}>
+        <canvas ref={canvas2Ref} width="480" height="92" />
       </div>
     </section>
   )

@@ -22,6 +22,25 @@ import { testConnectionAPI } from "./utils/api"
 // App shell: owns the global config (keyboardMode and themeColor persist in
 // localStorage), the settings overlay, and applies the theme by overriding
 // the --bg-black CSS variable.
+// Accents from the old high-contrast kiosk theme. They were picked for a
+// light orange ground and clash with the dark glass one, so a stored value
+// from that era is migrated to the current default instead of being honoured.
+const LEGACY_ACCENTS = new Set([
+  "#ffa500",
+  "#ff4444",
+  "#ffffff",
+  "#ffeb3b",
+  "#2196f3",
+  "#4caf50",
+])
+const DEFAULT_ACCENT = "#6c8cff"
+
+function resolveThemeColor() {
+  const stored = localStorage.getItem("themeColor")
+  if (!stored || LEGACY_ACCENTS.has(stored.toLowerCase())) return DEFAULT_ACCENT
+  return stored
+}
+
 function App() {
   // Global configuration
   const [config, setConfig] = useState({
@@ -33,7 +52,7 @@ function App() {
     enableTts: true,
     visualizerBars: 16,
     systemPrompt: "Translator mode",
-    themeColor: localStorage.getItem("themeColor") || "#ffa500",
+    themeColor: resolveThemeColor(),
   })
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)

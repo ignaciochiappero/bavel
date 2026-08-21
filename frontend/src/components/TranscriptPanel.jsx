@@ -15,7 +15,18 @@
  */
 
 import React, { useEffect, useRef } from "react"
+import {
+  PictureInPicture2,
+  Settings,
+  History,
+  MessageSquarePlus,
+  Save,
+  Check,
+  Loader2,
+  RotateCcw,
+} from "lucide-react"
 import { computeDocView } from "../utils/docView"
+import StreamingText from "./StreamingText"
 
 // Full conversation transcript: all spoken text accumulates as one
 // continuous paragraph per column (source | translation), with save-to-
@@ -49,16 +60,24 @@ export default function TranscriptPanel({
             onClick={onToggleFloat}
             title="Ventana flotante"
           >
-            ⧉ Flotante
+            <PictureInPicture2 size={14} strokeWidth={1.75} />
+            <span>Flotante</span>
           </button>
-          <button className="header-btn" onClick={onOpenSettings} title="Configuración">
-            ⚙️
+          <button
+            className="header-btn header-btn-icon"
+            onClick={onOpenSettings}
+            title="Configuración"
+            aria-label="Configuración"
+          >
+            <Settings size={15} strokeWidth={1.75} />
           </button>
           <button className="header-btn" onClick={onOpenHistory}>
-            Historial
+            <History size={14} strokeWidth={1.75} />
+            <span>Historial</span>
           </button>
           <button className="header-btn" onClick={onNewCall}>
-            Nueva charla
+            <MessageSquarePlus size={14} strokeWidth={1.75} />
+            <span>Nueva charla</span>
           </button>
           <button
             className={`header-btn header-btn-save ${
@@ -67,13 +86,27 @@ export default function TranscriptPanel({
             onClick={onSave}
             disabled={conversation.length === 0 || saveState === "saving"}
           >
-            {saveState === "saving"
-              ? "Guardando…"
-              : saveState === "saved"
-                ? "✓ Guardado"
-                : saveState === "error"
-                  ? "Reintentar"
-                  : "Guardar"}
+            {saveState === "saving" ? (
+              <>
+                <Loader2 size={14} strokeWidth={1.75} className="spin" />
+                <span>Guardando…</span>
+              </>
+            ) : saveState === "saved" ? (
+              <>
+                <Check size={14} strokeWidth={2} />
+                <span>Guardado</span>
+              </>
+            ) : saveState === "error" ? (
+              <>
+                <RotateCcw size={14} strokeWidth={1.75} />
+                <span>Reintentar</span>
+              </>
+            ) : (
+              <>
+                <Save size={14} strokeWidth={1.75} />
+                <span>Guardar</span>
+              </>
+            )}
           </button>
         </div>
       </header>
@@ -100,13 +133,20 @@ function DocView({ conversation }) {
       <div className="doc-column">
         <div className="doc-label">{view.sourceLabel}</div>
         <div className="doc-text">
-          {view.leftText || "—"}
-          {view.isLive && <span className="live-caret" />}
+          {/* The pending tail is the part LocalAgreement has not confirmed:
+              it renders dimmed because it may still be rewritten. */}
+          <StreamingText
+            text={view.leftText}
+            pending={view.leftPending}
+            isLive={view.isLive}
+          />
         </div>
       </div>
       <div className="doc-column doc-column-target">
         <div className="doc-label">{view.targetLabel}</div>
-        <div className="doc-text">{view.rightText || "—"}</div>
+        <div className="doc-text">
+          <StreamingText text={view.rightText} />
+        </div>
       </div>
     </div>
   )

@@ -15,9 +15,10 @@
  */
 
 import React, { useEffect, useRef } from "react"
+import { ChevronLeft, ChevronRight } from "lucide-react"
 
 // One person's lane: the vertical "revolver" language selector plus a
-// mouse-driven dropdown. The kiosk is keyboard-first — the ◀▶ arrows stay
+// mouse-driven dropdown. The kiosk is keyboard-first — the chevron arrows stay
 // in the DOM for layout but are hidden via CSS (.rotator-arrow).
 export default function LanguageLane({
   laneId,
@@ -86,7 +87,7 @@ export default function LanguageLane({
           title="Previous language"
           onClick={handlePrev}
         >
-          ◀
+          <ChevronLeft size={14} strokeWidth={1.75} />
         </button>
         <div className="revolver-viewport">
           <div className="revolver-drum" ref={drumRef}>
@@ -102,7 +103,7 @@ export default function LanguageLane({
           title="Next language"
           onClick={handleNext}
         >
-          ▶
+          <ChevronRight size={14} strokeWidth={1.75} />
         </button>
       </div>
       <span className="language-name" style={{ display: "none" }}>

@@ -25,6 +25,52 @@
     <title>Bavel</title>
   </head>
   <body>
+    <!--
+      Gooey/liquid filter. Blurring the source and then crushing the alpha
+      channel with a steep feColorMatrix makes nearby shapes bleed into one
+      another and snap back to hard edges — neighbouring visualizer bars merge
+      like droplets instead of reading as a bar chart.
+
+      This is the classic SVG-filter technique rather than a WebGL shader on
+      purpose: it runs in the compositor and costs no CPU, which matters
+      because the speech models already saturate several cores.
+    -->
+    <svg
+      width="0"
+      height="0"
+      style="position: absolute"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <defs>
+        <filter id="liquid">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="7" result="soft" />
+          <feColorMatrix
+            in="soft"
+            mode="matrix"
+            values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 20 -9"
+            result="goo"
+          />
+          <feBlend in="SourceGraphic" in2="goo" />
+        </filter>
+        <!--
+          Gentler variant for controls. A sliding indicator is chased by a
+          lagging twin; while they are apart the blur merges them into one
+          stretched blob that snaps back together — the droplet effect.
+          stdDeviation is lower than #liquid so small UI keeps crisp edges,
+          and SourceGraphic is NOT blended back: the labels sit outside the
+          filtered layer so text never goes soft.
+        -->
+        <filter id="gooey">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="soft" />
+          <feColorMatrix
+            in="soft"
+            mode="matrix"
+            values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 18 -7"
+          />
+        </filter>
+      </defs>
+    </svg>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>

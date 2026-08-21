@@ -43,7 +43,7 @@ describe("TranscriptPanel", () => {
   })
 
   it("joins multiple utterances into one continuous paragraph per column", () => {
-    render(
+    const { container } = render(
       <TranscriptPanel
         {...baseProps}
         conversation={[
@@ -72,12 +72,13 @@ describe("TranscriptPanel", () => {
         ]}
       />,
     )
-    expect(screen.getByText("Hello How are you Fine thanks")).toBeTruthy()
-    expect(screen.getByText("Hola Cómo estás")).toBeTruthy()
+    const cols = container.querySelectorAll(".doc-text")
+    expect(cols[0].textContent).toBe("Hello How are you Fine thanks")
+    expect(cols[1].textContent).toBe("Hola Cómo estás")
   })
 
   it("renders a transcription entry in the source column", () => {
-    render(
+    const { container } = render(
       <TranscriptPanel
         {...baseProps}
         conversation={[
@@ -91,12 +92,14 @@ describe("TranscriptPanel", () => {
         ]}
       />,
     )
-    expect(screen.getByText("Live text")).toBeTruthy()
+    expect(container.querySelectorAll(".doc-text")[0].textContent).toBe(
+      "Live text",
+    )
     expect(screen.queryByText("Spanish")).toBeNull()
   })
 
   it("shows a blinking caret on live entries", () => {
-    render(
+    const { container } = render(
       <TranscriptPanel
         {...baseProps}
         conversation={[
@@ -110,7 +113,9 @@ describe("TranscriptPanel", () => {
         ]}
       />,
     )
-    expect(screen.getByText("Partial").querySelector(".live-caret")).toBeTruthy()
+    const col = container.querySelectorAll(".doc-text")[0]
+    expect(col.textContent).toBe("Partial")
+    expect(col.querySelector(".live-caret")).toBeTruthy()
   })
 
   it("disables the save button with no messages", () => {
@@ -153,5 +158,58 @@ describe("TranscriptPanel", () => {
     expect(baseProps.onNewCall).toHaveBeenCalled()
     fireEvent.click(screen.getByRole("button", { name: "Guardar" }))
     expect(baseProps.onSave).toHaveBeenCalled()
+  })
+})
+
+describe("TranscriptPanel — LocalAgreement pending tail", () => {
+  const liveEntry = {
+    key: 1,
+    kind: "transcription",
+    sourceName: "English",
+    transcript: "hola cómo",
+    pending: "estás",
+    live: true,
+    ts: "2026-08-19T12:00:00Z",
+  }
+
+  it("renders the unconfirmed tail dimmed and separate from committed text", () => {
+    const { container } = render(
+      <TranscriptPanel {...baseProps} conversation={[liveEntry]} />,
+    )
+    const pending = container.querySelector(".doc-text-pending")
+    expect(pending).toBeTruthy()
+    expect(pending.textContent.trim()).toBe("estás")
+    // The committed prefix is NOT inside the dimmed span.
+    expect(pending.textContent).not.toContain("hola")
+  })
+
+  it("keeps a space between the committed prefix and the pending tail", () => {
+    const { container } = render(
+      <TranscriptPanel {...baseProps} conversation={[liveEntry]} />,
+    )
+    expect(container.querySelector(".doc-text").textContent).toBe(
+      "hola cómo estás",
+    )
+  })
+
+  it("renders no dimmed span once the entry is committed", () => {
+    const { container } = render(
+      <TranscriptPanel
+        {...baseProps}
+        conversation={[{ ...liveEntry, transcript: "hola cómo estás", pending: "", live: false }]}
+      />,
+    )
+    expect(container.querySelector(".doc-text-pending")).toBeNull()
+    expect(container.querySelector(".live-caret")).toBeNull()
+  })
+
+  it("does not show the em-dash placeholder while only pending text exists", () => {
+    const { container } = render(
+      <TranscriptPanel
+        {...baseProps}
+        conversation={[{ ...liveEntry, transcript: "", pending: "hola" }]}
+      />,
+    )
+    expect(container.querySelector(".doc-text").textContent.trim()).toBe("hola")
   })
 })

@@ -15,6 +15,7 @@
  */
 
 import React from "react"
+import { X, Minus, Plus } from "lucide-react"
 
 // Fullscreen developer settings: theme color, LLM endpoint/model/key,
 // keyboard mode, TTS toggle, visualizer density, and system volume
@@ -26,13 +27,16 @@ export default function SettingsOverlay({
   setConfig,
   onTestConnection,
 }) {
+  // Accent hues for the dark glass theme. These drive the aurora behind the
+  // panels, the active-lane rim light and the visualizer, so they are chosen
+  // to stay legible at low opacity rather than for raw saturation.
   const THEME_COLORS = [
-    { name: "RED", value: "#ff4444" },
-    { name: "WHITE", value: "#ffffff" },
-    { name: "YELLOW", value: "#ffeb3b" },
-    { name: "BLUE", value: "#2196f3" },
-    { name: "GREEN", value: "#4caf50" },
-    { name: "ORANGE", value: "#ffa500" },
+    { name: "IRIS", value: "#6c8cff" },
+    { name: "MINT", value: "#4fd1a5" },
+    { name: "ROSE", value: "#ff7ac6" },
+    { name: "VIOLET", value: "#a78bfa" },
+    { name: "AMBER", value: "#ffb454" },
+    { name: "ICE", value: "#7dd3fc" },
   ];
 
   const [systemVolume, setSystemVolume] = React.useState(null);
@@ -79,8 +83,12 @@ export default function SettingsOverlay({
     >
       <header className="overlay-header">
         <h2>Developer Settings</h2>
-        <button className="overlay-close-btn" onClick={onClose}>
-          ✕
+        <button
+          className="overlay-close-btn"
+          onClick={onClose}
+          aria-label="Cerrar"
+        >
+          <X size={16} strokeWidth={1.75} />
         </button>
       </header>
       <div className="overlay-body">
@@ -91,8 +99,9 @@ export default function SettingsOverlay({
               className="overlay-btn"
               style={{ flex: 1 }}
               onClick={() => handleVolumeChange('down')}
+              aria-label="Bajar volumen"
             >
-              -
+              <Minus size={15} strokeWidth={1.75} />
             </button>
             <span style={{ minWidth: "40px", textAlign: "center", fontWeight: "bold" }}>
               {systemVolume !== null ? `${systemVolume}%` : "--"}
@@ -101,8 +110,9 @@ export default function SettingsOverlay({
               className="overlay-btn"
               style={{ flex: 1 }}
               onClick={() => handleVolumeChange('up')}
+              aria-label="Subir volumen"
             >
-              +
+              <Plus size={15} strokeWidth={1.75} />
             </button>
           </div>
         </div>
@@ -120,8 +130,11 @@ export default function SettingsOverlay({
                   height: '30px',
                   borderRadius: '50%',
                   backgroundColor: c.value,
-                  border: config.themeColor === c.value ? '2px solid #000' : '2px solid transparent',
-                  boxShadow: config.themeColor === c.value ? '0 0 0 2px #fff' : 'none',
+                  border: '1px solid rgba(255,255,255,0.18)',
+                  boxShadow:
+                    config.themeColor === c.value
+                      ? `0 0 0 2px rgba(255,255,255,0.9), 0 0 18px ${c.value}`
+                      : 'none',
                   cursor: 'pointer',
                   padding: 0
                 }}
