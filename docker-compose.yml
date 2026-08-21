@@ -7,6 +7,11 @@ services:
       context: .
       dockerfile: docker/Dockerfile
     container_name: bavel
+    environment:
+      # Moonshine STT architecture. TINY_STREAMING measured 3x faster than the
+      # library default (MEDIUM_STREAMING) with equal quality on clean audio.
+      # Switch to MEDIUM_STREAMING for noisy rooms or strong accents.
+      - MOONSHINE_STT_ARCH=TINY_STREAMING
     ports:
       - "3000:3000"
     volumes:

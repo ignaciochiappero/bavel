@@ -118,6 +118,14 @@ Installs OS packages, sets up the environment, downloads the model, registers a 
 | `GET /api/sessions/<id>/messages` | Load a session's messages |
 | `POST /proxy?url=…` | LLM proxy (restricted to `localhost:9379`) |
 
+## Tuning
+
+| Env var | Default | What it does |
+| :--- | :--- | :--- |
+| `MOONSHINE_STT_ARCH` | `TINY_STREAMING` | Moonshine STT architecture. The library defaults English to `MEDIUM_STREAMING`, which measured **0.83x real time** on a 17s monologue — almost no headroom over live speech. `TINY_STREAMING` ran the same audio at **0.27x** (3x faster) with equal quality on clean audio. Set `MEDIUM_STREAMING` for noisy rooms or strong accents; set empty to use the per-language default. Unavailable architectures fall back automatically. |
+
+Set it in `docker-compose.yml` under `environment:`, then `docker compose up -d --build`.
+
 ## Troubleshooting
 
 | Symptom | Fix |
@@ -128,6 +136,8 @@ Installs OS packages, sets up the environment, downloads the model, registers a 
 | Microphone doesn't work in WSL2 | Mic pass-through needs [usbipd-win](https://github.com/dorssel/usbipd-win); tab listening doesn't need a mic |
 | Model re-downloads every rebuild | Volume `translator-data` was removed (don't use `down -v`) |
 | Hugging Face download is slow | Set a `HF_TOKEN` env var to lift anonymous rate limits |
+| Container restarts with `exec /entrypoint.sh: no such file or directory` | A Windows checkout rewrote `*.sh` with CRLF, so the shebang points at `/bin/sh`. `.gitattributes` prevents it; if you hit it anyway, run `git config core.autocrlf false` and re-checkout |
+| Transcription falls behind the speaker | Check `MOONSHINE_STT_ARCH` (see **Tuning**) — a heavier model can exceed 1x real time, after which the backlog only grows |
 
 ## Testing
 

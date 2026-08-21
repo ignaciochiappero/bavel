@@ -39,6 +39,40 @@ from collections import OrderedDict
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SUPPORTED_STT_LANGS = {"en", "ar", "es", "ja", "zh", "ko"}
 MAX_MODELS = 2
+
+# Which Moonshine architecture to prefer. moonshine-voice defaults English to
+# MEDIUM_STREAMING, the heaviest of the family; measured on a 17 s monologue it
+# transcribes at 0.83x real time, leaving almost no headroom over live speech.
+# TINY_STREAMING ran the same audio at 0.27x — 3x faster — with equal or better
+# output on clean audio (it even punctuated "Good morning, everyone." correctly
+# where MEDIUM produced "Good morning. Everyone thanks").
+#
+# MEDIUM is likely still the better choice for noisy rooms or strong accents,
+# so this is an env knob rather than a hard-coded downgrade. Set
+# MOONSHINE_STT_ARCH=MEDIUM_STREAMING to go back, or "" to use the library
+# default for each language.
+STT_ARCH = os.environ.get("MOONSHINE_STT_ARCH", "TINY_STREAMING").strip()
+
+
+def resolve_stt_model(language):
+    """(model_path, model_arch) for a language, honouring STT_ARCH when it
+    exists for that language and falling back to the library default when it
+    does not — not every architecture is published for every language."""
+    from moonshine_voice import get_model_for_language
+    from moonshine_voice.moonshine_api import ModelArch
+
+    if STT_ARCH:
+        wanted = getattr(ModelArch, STT_ARCH, None)
+        if wanted is None:
+            print(f"[STT] Unknown MOONSHINE_STT_ARCH={STT_ARCH!r}; using default")
+        else:
+            try:
+                return get_model_for_language(language, wanted_model_arch=wanted)
+            except Exception as e:
+                print(f"[STT] {STT_ARCH} unavailable for {language} ({e}); using default")
+    return get_model_for_language(language)
+
+
 _stt_recognizers = OrderedDict()  # language -> recognizer
 # RLock (reentrant): handle_stt holds the lock across get_stt_recognizer() + inference,
 # and get_stt_recognizer() re-acquires it on the same thread. A plain Lock() self-deadlocks.
@@ -93,15 +127,246 @@ def get_stt_recognizer(language="en"):
         if language in _stt_recognizers:
             _stt_recognizers.move_to_end(language)
             return _stt_recognizers[language]
-        from moonshine_voice import get_model_for_language, Transcriber
-        print(f"[STT] Loading Moonshine STT (lang={language})...")
-        if len(_stt_recognizers) >= MAX_MODELS:
-            oldest_lang, oldest_recognizer = _stt_recognizers.popitem(last=False)
-            print(f"[STT] Evicting model for {oldest_lang}")
-            del oldest_recognizer
-        model_path, model_arch = get_model_for_language(language)
-        _stt_recognizers[language] = Transcriber(model_path=model_path, model_arch=model_arch)
+        from moonshine_voice import Transcriber
+        begin_activity(f"stt:{language}", "stt", language)
+        try:
+            model_path, model_arch = resolve_stt_model(language)
+            print(f"[STT] Loading Moonshine STT (lang={language}, arch={model_arch.name})...")
+            if len(_stt_recognizers) >= MAX_MODELS:
+                oldest_lang, oldest_recognizer = _stt_recognizers.popitem(last=False)
+                print(f"[STT] Evicting model for {oldest_lang}")
+                del oldest_recognizer
+            _stt_recognizers[language] = Transcriber(model_path=model_path, model_arch=model_arch)
+        finally:
+            end_activity(f"stt:{language}")
         return _stt_recognizers[language]
+
+
+# ---------------------------------------------------------------------------
+# Fast translation via Argos Translate (CTranslate2 NMT, offline, CPU).
+#
+# Measured head-to-head against Gemma 4B on this machine, same sentences:
+#   Argos  61ms average
+#   Gemma  1.76s average      -> 29x slower
+# with equivalent quality (Argos was arguably better on 2 of 5 sentences).
+#
+# A general-purpose LLM is the wrong tool for translation latency: a dedicated
+# NMT model does the same job in milliseconds. Gemma stays available as a
+# fallback for pairs Argos cannot serve.
+#
+# Language packages download on first use (~7s per pair) into
+# ~/.local/share/argos-translate, which lives in the mounted volume, so the
+# download happens once.
+
+# ---------------------------------------------------------------------------
+# Warm-up state, exposed at GET /api/ready.
+#
+# The heavy models (Moonshine STT, moonshine-voice TTS, the Argos NMT) each
+# cost seconds to load the first time. Without a signal the UI just looks slow
+# during that window, so the frontend polls this and tells the user the system
+# is still preparing rather than leaving them guessing.
+
+_warmup_lock = threading.Lock()
+_warmup = {
+    # pending -> loading -> ready | error
+    "stt": "pending",
+    "tts": "pending",
+    "translation": "pending",
+    "started_at": None,   # time.monotonic() when prewarm began
+    "ready_at": None,     # time.monotonic() when everything finished
+}
+
+# In-flight LAZY loads, which are the expensive ones users actually hit.
+# The boot prewarm only covers en->es; picking any other language pair
+# downloads and loads its package on first use — measured at 26.66s for
+# es->en versus 0.05s once resident. Reporting "ready" during that window is
+# what made the app look broken instead of busy.
+_activity = {}  # key -> {"kind": str, "detail": str, "started_at": float}
+
+
+def begin_activity(key, kind, detail):
+    with _warmup_lock:
+        _activity[key] = {
+            "kind": kind,
+            "detail": detail,
+            "started_at": time.monotonic(),
+        }
+
+
+def end_activity(key):
+    with _warmup_lock:
+        _activity.pop(key, None)
+
+
+def set_warmup(component, state):
+    with _warmup_lock:
+        _warmup[component] = state
+        if all(
+            _warmup[c] in ("ready", "error") for c in ("stt", "tts", "translation")
+        ) and _warmup["ready_at"] is None:
+            _warmup["ready_at"] = time.monotonic()
+
+
+def handle_ready(handler):
+    with _warmup_lock:
+        components = {c: _warmup[c] for c in ("stt", "tts", "translation")}
+        started = _warmup["started_at"]
+        finished = _warmup["ready_at"]
+    now = time.monotonic()
+    with _warmup_lock:
+        busy = [
+            {
+                "kind": a["kind"],
+                "detail": a["detail"],
+                "elapsed_ms": round((now - a["started_at"]) * 1000),
+            }
+            for a in _activity.values()
+        ]
+    # "ready" means usable: a component that failed to warm up still works, it
+    # just pays its load cost on first use. An in-flight lazy load makes the
+    # system NOT ready — that is precisely the window the UI must announce.
+    warm = all(v in ("ready", "error") for v in components.values())
+    _send_json(
+        handler,
+        200,
+        {
+            "ready": warm and not busy,
+            "components": components,
+            "busy": busy,
+            "elapsed_ms": round((now - started) * 1000) if started else 0,
+            "warmup_ms": round((finished - started) * 1000)
+            if (started and finished)
+            else None,
+        },
+    )
+
+
+_argos_lock = threading.Lock()
+_argos_installed = set()  # (from_code, to_code) pairs known to be installed
+
+
+def ensure_argos_pair(src, dst):
+    """Installs the src->dst package if missing. Returns True when the pair is
+    usable. Safe to call on every request — after the first it is a set lookup."""
+    if (src, dst) in _argos_installed:
+        return True
+    with _argos_lock:
+        if (src, dst) in _argos_installed:
+            return True
+        try:
+            import argostranslate.package as pkg
+
+            for installed in pkg.get_installed_packages():
+                _argos_installed.add((installed.from_code, installed.to_code))
+            if (src, dst) in _argos_installed:
+                return True
+
+            pkg.update_package_index()
+            match = next(
+                (
+                    p
+                    for p in pkg.get_available_packages()
+                    if p.from_code == src and p.to_code == dst
+                ),
+                None,
+            )
+            if match is None:
+                print(f"[Translate] No Argos package for {src}->{dst}")
+                return False
+            print(f"[Translate] Downloading Argos package {src}->{dst}...")
+            begin_activity(f"argos:{src}-{dst}", "translation", f"{src}→{dst}")
+            try:
+                pkg.install_from_path(match.download())
+            finally:
+                end_activity(f"argos:{src}-{dst}")
+            _argos_installed.add((src, dst))
+            return True
+        except Exception as e:
+            print(f"[Translate] Argos setup failed for {src}->{dst}: {e}")
+            return False
+
+
+def handle_warmup(handler, body):
+    """Preloads a language pair in the background so the cost is paid while the
+    user is still choosing languages, not mid-sentence. Returns immediately;
+    progress shows up in /api/ready as busy activity."""
+    try:
+        data = json.loads(body.decode("utf-8")) if body else {}
+    except Exception:
+        _send_json(handler, 400, {"error": "Invalid JSON body"})
+        return
+
+    src = str(data.get("source") or "").strip()
+    dst = str(data.get("target") or "").strip()
+    if not src:
+        _send_json(handler, 400, {"error": "source is required"})
+        return
+
+    def _warm():
+        try:
+            if src in SUPPORTED_STT_LANGS:
+                get_stt_recognizer(src)
+            if dst and dst != src and ensure_argos_pair(src, dst):
+                import argostranslate.translate as _argos
+                with _argos_lock:
+                    _argos.translate("warm up", src, dst)
+        except Exception as e:
+            print(f"[Warmup] {src}->{dst} failed: {e}", flush=True)
+
+    threading.Thread(target=_warm, daemon=True).start()
+    _send_json(handler, 202, {"warming": True, "source": src, "target": dst})
+
+
+def handle_translate(handler, body):
+    try:
+        data = json.loads(body.decode("utf-8")) if body else {}
+    except Exception:
+        _send_json(handler, 400, {"error": "Invalid JSON body"})
+        return
+
+    text = str(data.get("text") or "").strip()
+    src = str(data.get("source") or "").strip()
+    dst = str(data.get("target") or "").strip()
+    if not text or not src or not dst:
+        _send_json(handler, 400, {"error": "text, source and target are required"})
+        return
+    if src == dst:
+        _send_json(handler, 200, {"text": text, "engine": "identity", "ms": 0})
+        return
+
+    started = time.monotonic()
+    if not ensure_argos_pair(src, dst):
+        _send_json(
+            handler,
+            503,
+            {"error": f"No translation package for {src}->{dst}", "engine": "none"},
+        )
+        return
+
+    # `ms` covers package installation too — the first call for a pair took
+    # 26.66s wall while inference alone was 4.4s, and reporting only the latter
+    # hid the real cost.
+    try:
+        import argostranslate.translate as argos
+
+        # CTranslate2 releases the GIL during inference, but the Python wrapper
+        # keeps per-model state; serialise to stay safe under the threading server.
+        with _argos_lock:
+            out = argos.translate(text, src, dst)
+    except Exception as e:
+        traceback.print_exc()
+        _send_json(handler, 500, {"error": f"Translation failed: {e}"})
+        return
+
+    _send_json(
+        handler,
+        200,
+        {
+            "text": (out or "").strip(),
+            "engine": "argos",
+            "ms": round((time.monotonic() - started) * 1000),
+        },
+    )
 
 
 PORT = 3000
@@ -290,8 +555,37 @@ class ProxyHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             if key.lower() not in ['host', 'connection', 'content-length', 'x-target-url']:
                 req.add_header(key, val)
 
+        # A streaming request must NOT be buffered: reading the whole upstream
+        # body before replying would erase the entire point of SSE (the client
+        # would still wait for the last token). Detected from the request body
+        # so only chat completions with "stream": true take the chunked path.
+        streaming = bool(body) and b'"stream"' in body and b'true' in body
+
         try:
             with urllib.request.urlopen(req, timeout=300) as response:
+                if streaming:
+                    self.send_response(response.status)
+                    for key, val in response.headers.items():
+                        if key.lower() not in (
+                            'content-length',
+                            'connection',
+                            'transfer-encoding',
+                        ):
+                            self.send_header(key, val)
+                    self.send_header('Transfer-Encoding', 'chunked')
+                    self.end_headers()
+                    while True:
+                        piece = response.read(1024)
+                        if not piece:
+                            break
+                        self.wfile.write(
+                            ('%X\r\n' % len(piece)).encode('ascii') + piece + b'\r\n'
+                        )
+                        self.wfile.flush()
+                    self.wfile.write(b'0\r\n\r\n')
+                    self.wfile.flush()
+                    return
+
                 res_body = response.read()
                 self.send_response(response.status)
                 # Forward response headers
@@ -432,8 +726,8 @@ class ProxyHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             language = "en"
 
         try:
-            from moonshine_voice import get_model_for_language, Transcriber
-            model_path, model_arch = get_model_for_language(language)
+            from moonshine_voice import Transcriber
+            model_path, model_arch = resolve_stt_model(language)
             recognizer = Transcriber(model_path=model_path, model_arch=model_arch)
             stream = recognizer.create_stream(update_interval=0.5)
             stream.start()
@@ -635,6 +929,16 @@ class ProxyHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         if self.path.startswith('/proxy'):
             self.handle_proxy()
             return
+        if self.path.startswith('/api/warmup'):
+            content_length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(content_length)
+            handle_warmup(self, body)
+            return
+        if self.path.startswith('/api/translate'):
+            content_length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(content_length)
+            handle_translate(self, body)
+            return
         if self.path.startswith('/api/stt/stream/start'):
             content_length = int(self.headers.get('Content-Length', 0))
             body = self.rfile.read(content_length)
@@ -668,6 +972,10 @@ class ProxyHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path.startswith('/proxy'):
             self.handle_proxy()
+            return
+
+        if self.path.startswith('/api/ready'):
+            handle_ready(self)
             return
 
         if self.path.startswith('/api/tts'):
@@ -733,6 +1041,10 @@ class ProxyHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             '.gif': 'image/gif',
             '.svg': 'image/svg+xml',
             '.ico': 'image/x-icon',
+            '.woff': 'font/woff',
+            '.woff2': 'font/woff2',
+            '.ttf': 'font/ttf',
+            '.otf': 'font/otf',
         }
         content_type = mime_types.get(ext, 'application/octet-stream')
 
@@ -777,13 +1089,39 @@ if __name__ == '__main__':
             print(f"👉 {protocol}://{local_ip}:{PORT} (Local Network)")
         print(f"===========================================================")
         def _prewarm_models():
+            with _warmup_lock:
+                _warmup["started_at"] = time.monotonic()
+            print("[Prewarm] Loading default English STT & TTS models into memory...", flush=True)
+
+            for name, load in (
+                ("stt", lambda: get_stt_recognizer("en")),
+                ("tts", lambda: get_tts_engine("en")),
+            ):
+                set_warmup(name, "loading")
+                try:
+                    load()
+                    set_warmup(name, "ready")
+                except Exception as e:
+                    print(f"[Prewarm Error] {name}: {e}", flush=True)
+                    set_warmup(name, "error")
+
+            # Argos costs ~3.6s on its first call and ~50ms afterwards, so pay
+            # that once at boot instead of on the user's first sentence.
+            set_warmup("translation", "loading")
             try:
-                print("[Prewarm] Loading default English STT & TTS models into memory...", flush=True)
-                get_stt_recognizer("en")
-                get_tts_engine("en")
-                print("[Prewarm] Models pre-warmed successfully.", flush=True)
+                if ensure_argos_pair("en", "es"):
+                    import argostranslate.translate as _argos
+                    with _argos_lock:
+                        _argos.translate("warm up", "en", "es")
+                    set_warmup("translation", "ready")
+                    print("[Prewarm] Translation engine ready.", flush=True)
+                else:
+                    set_warmup("translation", "error")
             except Exception as e:
-                print(f"[Prewarm Error] {e}", flush=True)
+                print(f"[Prewarm Error] translation: {e}", flush=True)
+                set_warmup("translation", "error")
+
+            print("[Prewarm] Models pre-warmed successfully.", flush=True)
 
         threading.Thread(target=_prewarm_models, daemon=True).start()
         try:
