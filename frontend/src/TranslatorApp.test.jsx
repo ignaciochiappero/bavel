@@ -55,10 +55,7 @@ vi.mock("./utils/api", () => ({
   getReadiness: vi.fn(async () => ({ ready: true, components: {}, busy: [] })),
 }))
 
-// jsdom has no 2D canvas context; the visualizer is not under test here.
-vi.mock("./components/Visualizer", () => ({
-  default: () => <div data-testid="visualizer" />,
-}))
+
 
 const config = {
   endpointUrl: "http://localhost:9379/v1",
@@ -67,7 +64,6 @@ const config = {
   keyboardMode: "landscape",
   useProxy: true,
   enableTts: true,
-  visualizerBars: 16,
   systemPrompt: "Translator mode",
   themeColor: "#ffa500",
 }

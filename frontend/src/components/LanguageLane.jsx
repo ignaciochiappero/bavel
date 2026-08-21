@@ -22,6 +22,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react"
 // in the DOM for layout but are hidden via CSS (.rotator-arrow).
 export default function LanguageLane({
   laneId,
+  laneRef,
   laneLabel,
   languages,
   currentIndex,
@@ -58,6 +59,7 @@ export default function LanguageLane({
 
   return (
     <section
+      ref={laneRef}
       className={`language-lane lane-${laneId === 1 ? "one" : "two"} ${isRecording ? "recording" : ""} ${isActivePerson ? "selected" : ""}`}
       id={`lane-${laneId}`}
     >

@@ -44,9 +44,7 @@ vi.mock("./hooks/useTabAudioCapture", () => ({
 
 vi.mock("./utils/floatingWindow", () => ({ openFloatingWindow: vi.fn() }))
 vi.mock("./utils/audio-blip", () => ({ playBlip: vi.fn() }))
-vi.mock("./components/Visualizer", () => ({
-  default: () => <div data-testid="visualizer" />,
-}))
+
 
 vi.mock("./utils/api", () => ({
   transcribeAudio: vi.fn(),
@@ -84,7 +82,6 @@ const config = {
   keyboardMode: "landscape",
   useProxy: true,
   enableTts: false,
-  visualizerBars: 16,
   systemPrompt: "Translator mode",
   themeColor: "#ffa500",
 }

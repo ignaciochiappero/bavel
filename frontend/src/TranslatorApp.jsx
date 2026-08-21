@@ -26,10 +26,10 @@ import {
 } from "lucide-react"
 import LanguageLane from "./components/LanguageLane"
 import TranscriptPanel from "./components/TranscriptPanel"
-import Visualizer from "./components/Visualizer"
 import { useAudioRecorder } from "./hooks/useAudioRecorder"
 import { useTabAudioCapture } from "./hooks/useTabAudioCapture"
 import { useReadiness } from "./hooks/useReadiness"
+import { useAudioGlow } from "./hooks/useAudioGlow"
 import { openFloatingWindow } from "./utils/floatingWindow"
 import { createLocalAgreement } from "./utils/localAgreement"
 import { createTranslationSegmenter } from "./utils/translationSegmenter"
@@ -220,6 +220,15 @@ function TranslatorApp({ config, onOpenSettings }) {
   useEffect(() => {
     isTabCapturingRef.current = isTabCapturing
   }, [isTabCapturing])
+
+  // Lane elements, so audio level can be written straight onto them without
+  // re-rendering the translator on every animation frame.
+  const laneEls = useRef({ 1: null, 2: null })
+  useAudioGlow({
+    analyser: isTabCapturing ? tabAnalyser : analyser,
+    active: isRecording || isTabCapturing ? activePerson : null,
+    targets: laneEls.current,
+  })
 
   // Live ref to the active lane so the tab-listening loop always uses the
   // latest selection without re-subscribing the chunk handler.
@@ -1095,6 +1104,7 @@ function TranslatorApp({ config, onOpenSettings }) {
         <div className="languages-container">
           <LanguageLane
             laneId={1}
+            laneRef={(el) => (laneEls.current[1] = el)}
             laneLabel="1"
             languages={AVAILABLE_LANGUAGES}
             currentIndex={lang1Index}
@@ -1108,6 +1118,7 @@ function TranslatorApp({ config, onOpenSettings }) {
           />
           <LanguageLane
             laneId={2}
+            laneRef={(el) => (laneEls.current[2] = el)}
             laneLabel="2"
             languages={AVAILABLE_LANGUAGES}
             currentIndex={lang2Index}
@@ -1121,12 +1132,6 @@ function TranslatorApp({ config, onOpenSettings }) {
           />
         </div>
 
-        <Visualizer
-          activePerson={activePerson}
-          isRecording={isRecording || isTabCapturing}
-          analyser={isTabCapturing ? tabAnalyser : analyser}
-          barsCount={parseInt(config.visualizerBars, 10)}
-        />
       </main>
     </div>
   )
