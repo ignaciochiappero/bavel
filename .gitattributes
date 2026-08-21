@@ -1,0 +1,19 @@
+# Normalize line endings so the repo builds identically on every platform.
+* text=auto
+
+# Shell scripts MUST keep LF: they run inside Linux containers and on the Pi.
+# With CRLF the shebang becomes "#!/bin/sh\r" and exec fails with the
+# misleading "no such file or directory".
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.service text eol=lf
+
+# Windows launchers stay CRLF.
+*.bat text eol=crlf
+
+# Never touch binaries.
+*.stl binary
+*.woff binary
+*.woff2 binary
+*.png binary
+*.gif binary

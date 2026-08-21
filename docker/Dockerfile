@@ -29,7 +29,12 @@ COPY backend/ backend/
 COPY --from=frontend-build /app/frontend/dist/ frontend/dist/
 
 COPY docker/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+# Strip CR before making it executable: a Windows checkout with
+# core.autocrlf=true turns the shebang into "#!/bin/sh\r", and the container
+# then dies with the misleading "exec /entrypoint.sh: no such file or
+# directory". .gitattributes prevents it at checkout; this makes the image
+# build correctly even from a tree that slipped through.
+RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
 
 EXPOSE 3000
 
